@@ -3,6 +3,7 @@ from fastapi import FastAPI, Depends
 from fastapi.responses import HTMLResponse
 from sqlalchemy import text
 from user_router import router as UserRouter
+from admin_router import router as AdminRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 import logging
@@ -13,6 +14,7 @@ app = FastAPI()
 
 # Include routers
 app.include_router(UserRouter)
+app.include_router(AdminRouter)
 
 
 @app.get("/")
