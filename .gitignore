@@ -1,0 +1,11 @@
+# .gitignore
+.env
+*.log
+.idea/
+.vscode/
+node_modules
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
