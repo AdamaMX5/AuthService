@@ -2,7 +2,7 @@ import pytest
 from fastapi import status
 
 from auth import create_access_token
-from test.test_utils import assert_status_code, get_auth_headers, make_user
+from test_utils import assert_status_code, get_auth_headers, make_user
 
 
 @pytest.mark.asyncio
