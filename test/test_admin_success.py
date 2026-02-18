@@ -1,3 +1,4 @@
+from pathlib import Path
 import pytest
 from fastapi import status
 
@@ -165,3 +166,54 @@ async def test_patch_user_partial_update_success(test_client, test_db):
     assert data["user"]["roles"] == ["USER", "SUPPORT"]
     assert data["user"]["permissions"]["reports"]["read"] is True
     assert data["user"]["comment"] == "updated by admin"
+async def test_set_jwt_keys_and_get_public_key_success(test_client, test_db):
+    admin = make_user(id="admin_jwt", email="admin_jwt@example.com", roles=["ADMIN"])
+    test_db.add(admin)
+    await test_db.commit()
+
+    token = create_access_token({"sub": admin.email})
+    private_key = "dummy-private-key"
+    public_key = "dummy-public-key"
+
+    set_response = await test_client.post(
+        "/admin/jwt/keys",
+        json={
+            "private_key": private_key,
+            "public_key": public_key,
+            "algorithm": "RS256",
+        },
+        headers=get_auth_headers(token),
+    )
+
+    assert_status_code(set_response, status.HTTP_200_OK)
+    payload = set_response.json()
+    assert payload["status"] == "jwt_keys_set"
+    assert payload["persisted"] is True
+
+    private_path = Path(payload["storage"]["private_key_path"])
+    public_path = Path(payload["storage"]["public_key_path"])
+    assert private_path.exists() is True
+    assert public_path.exists() is True
+
+    public_response = await test_client.get("/jwt/public-key")
+    assert_status_code(public_response, status.HTTP_200_OK)
+    assert public_response.json()["status"] == "ok"
+    assert public_response.json()["algorithm"] == "RS256"
+    assert public_response.json()["public_key"] == public_key
+
+
+@pytest.mark.asyncio
+async def test_jwt_key_storage_info_admin_success(test_client, test_db):
+    admin = make_user(id="admin_storage", email="admin_storage@example.com", roles=["ADMIN"])
+    test_db.add(admin)
+    await test_db.commit()
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.get("/admin/jwt/key-storage", headers=get_auth_headers(token))
+
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    assert "private_key_path" in data
+    assert "public_key_path" in data
+    assert data["private_key_loaded"] is False
+    assert data["public_key_loaded"] is False

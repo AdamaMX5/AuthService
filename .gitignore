@@ -9,3 +9,7 @@ __pycache__
 *$py.class
 *.so
 .Python
+
+# JWT key material (keep only examples in Git)
+keys/*.asc
+!keys/*.asc.example

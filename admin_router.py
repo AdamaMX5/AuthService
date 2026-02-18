@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from auth import get_current_user
+from auth import configure_jwt_keys, get_current_user, get_jwt_key_storage_info
 from database import get_db
 from models import User
 
@@ -35,6 +35,13 @@ class PermissionItem(BaseModel):
     value: Any
 
 
+class JwtKeyPair(BaseModel):
+    private_key: str
+    public_key: str
+    algorithm: str = "RS256"
+    persist_to_files: bool = True
+
+      
 class UserPatch(BaseModel):
     email: str | None = None
     email_verify_token: str | None = None
@@ -230,3 +237,33 @@ async def patch_user(
     await db.commit()
     await db.refresh(user)
     return {"status": "user_updated", "updated_fields": list(updates.keys()), "user": _serialize_user(user)}
+@router.post("/jwt/keys", status_code=status.HTTP_200_OK)
+async def set_jwt_keys(
+    data: JwtKeyPair,
+    current_user: User = Depends(get_current_user),
+):
+    """Set public/private key pair used for JWT access token signing."""
+    _require_admin(current_user)
+
+    configure_jwt_keys(
+        private_key=data.private_key,
+        public_key=data.public_key,
+        algorithm=data.algorithm,
+        persist_to_files=data.persist_to_files,
+    )
+
+    return {
+        "status": "jwt_keys_set",
+        "algorithm": data.algorithm,
+        "persisted": data.persist_to_files,
+        "storage": get_jwt_key_storage_info(),
+    }
+
+
+@router.get("/jwt/key-storage", status_code=status.HTTP_200_OK)
+async def get_jwt_key_storage(
+    current_user: User = Depends(get_current_user),
+):
+    """Read key storage configuration and load status."""
+    _require_admin(current_user)
+    return get_jwt_key_storage_info()
