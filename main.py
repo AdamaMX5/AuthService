@@ -6,6 +6,7 @@ from user_router import router as UserRouter
 from admin_router import router as AdminRouter
 from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
+from auth import get_jwt_algorithm, get_public_jwt_key
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,6 +22,18 @@ app.include_router(AdminRouter)
 def read_root():
     """Root endpoint."""
     return "hello Welt"
+
+
+
+
+@app.get("/jwt/public-key")
+async def get_jwt_public_key():
+    """Public endpoint to fetch JWT public key for token verification."""
+    public_key = get_public_jwt_key()
+    if not public_key:
+        return {"status": "not_configured", "public_key": None}
+
+    return {"status": "ok", "algorithm": get_jwt_algorithm(), "public_key": public_key}
 
 
 @app.get("/db_health")

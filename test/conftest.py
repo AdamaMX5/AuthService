@@ -25,6 +25,7 @@ sys.path.insert(0, str(root_dir))
 
 from main import app
 from database import get_db
+import auth
 
 # -------------------------------------------------
 # Logging
@@ -124,3 +125,18 @@ async def test_client(override_get_db):
         yield client
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_jwt_config(tmp_path):
+    auth.ALGORITHM = "HS256"
+    auth.JWT_PRIVATE_KEY = None
+    auth.JWT_PUBLIC_KEY = None
+    auth.JWT_PRIVATE_KEY_PASSPHRASE = None
+    auth.JWT_PRIVATE_KEY_PATH = str(tmp_path / "jwt_private.asc")
+    auth.JWT_PUBLIC_KEY_PATH = str(tmp_path / "jwt_public.asc")
+    yield
+    auth.ALGORITHM = "HS256"
+    auth.JWT_PRIVATE_KEY = None
+    auth.JWT_PUBLIC_KEY = None
+    auth.JWT_PRIVATE_KEY_PASSPHRASE = None
