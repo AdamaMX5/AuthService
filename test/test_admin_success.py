@@ -103,6 +103,69 @@ async def test_remove_permission_success(test_client, test_db):
 
 
 @pytest.mark.asyncio
+async def test_list_users_success(test_client, test_db):
+    admin = make_user(id="admin_5", email="admin5@example.com", roles=["ADMIN"])
+    user_a = make_user(id="user_5a", email="user5a@example.com", roles=["USER"])
+    user_b = make_user(id="user_5b", email="user5b@example.com", roles=["USER", "SUPPORT"])
+    test_db.add(admin)
+    test_db.add(user_a)
+    test_db.add(user_b)
+    await test_db.commit()
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.get("/admin/users", headers=get_auth_headers(token))
+
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    assert data["status"] == "users_listed"
+    ids = {entry["id"] for entry in data["users"]}
+    assert {"admin_5", "user_5a", "user_5b"}.issubset(ids)
+
+
+@pytest.mark.asyncio
+async def test_get_user_success(test_client, test_db):
+    admin = make_user(id="admin_6", email="admin6@example.com", roles=["ADMIN"])
+    target = make_user(id="user_6", email="user6@example.com", roles=["USER"])
+    test_db.add(admin)
+    test_db.add(target)
+    await test_db.commit()
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.get(f"/admin/users/{target.id}", headers=get_auth_headers(token))
+
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    assert data["status"] == "user_loaded"
+    assert data["user"]["id"] == target.id
+    assert data["user"]["email"] == target.email
+
+
+@pytest.mark.asyncio
+async def test_patch_user_partial_update_success(test_client, test_db):
+    admin = make_user(id="admin_7", email="admin7@example.com", roles=["ADMIN"])
+    target = make_user(id="user_7", email="user7@example.com", roles=["USER"])
+    test_db.add(admin)
+    test_db.add(target)
+    await test_db.commit()
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.patch(
+        f"/admin/users/{target.id}",
+        json={
+            "roles": ["USER", "SUPPORT"],
+            "permissions": {"reports": {"read": True}},
+            "comment": "updated by admin",
+        },
+        headers=get_auth_headers(token),
+    )
+
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    assert data["status"] == "user_updated"
+    assert set(data["updated_fields"]) == {"roles", "permissions", "comment"}
+    assert data["user"]["roles"] == ["USER", "SUPPORT"]
+    assert data["user"]["permissions"]["reports"]["read"] is True
+    assert data["user"]["comment"] == "updated by admin"
 async def test_set_jwt_keys_and_get_public_key_success(test_client, test_db):
     admin = make_user(id="admin_jwt", email="admin_jwt@example.com", roles=["ADMIN"])
     test_db.add(admin)
