@@ -1,4 +1,5 @@
 # admin_router.py
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,6 +33,40 @@ class PermissionItem(BaseModel):
     user_id: str
     key: str
     value: Any
+
+
+class UserPatch(BaseModel):
+    email: str | None = None
+    email_verify_token: str | None = None
+    is_email_verify: bool | None = None
+    hashed_password: str | None = None
+    is_password_verify: bool | None = None
+    password_reset_token: str | None = None
+    roles: list[str] | None = None
+    permissions: dict[str, Any] | None = None
+    comment: str | None = None
+    last_editor: str | None = None
+    last_login: datetime | None = None
+
+
+def _serialize_user(user: User) -> dict[str, Any]:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "email_verify_token": user.email_verify_token,
+        "is_email_verify": user.is_email_verify,
+        "hashed_password": user.hashed_password,
+        "is_password_verify": user.is_password_verify,
+        "password_reset_token": user.password_reset_token,
+        "roles": user.roles,
+        "permissions": user.permissions,
+        "comment": user.comment,
+        "last_editor": user.last_editor,
+        "created_at": user.created_at,
+        "edited_at": user.edited_at,
+        "deleted_at": user.deleted_at,
+        "last_login": user.last_login,
+    }
 
 
 def _require_admin(current_user: User) -> None:
@@ -141,3 +176,57 @@ async def remove_permission(
         "removed_value": removed_value,
         "permissions": user.permissions,
     }
+
+
+@router.get("/users", status_code=status.HTTP_200_OK)
+async def list_users(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return all users with their full persisted data."""
+    _require_admin(current_user)
+
+    users = (await db.exec(select(User))).all()
+    return {"status": "users_listed", "users": [_serialize_user(user) for user in users]}
+
+
+@router.get("/users/{user_id}", status_code=status.HTTP_200_OK)
+async def get_user(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Return one user with full persisted data."""
+    _require_admin(current_user)
+
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {"status": "user_loaded", "user": _serialize_user(user)}
+
+
+@router.patch("/users/{user_id}", status_code=status.HTTP_200_OK)
+async def patch_user(
+    user_id: str,
+    payload: UserPatch,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update one or multiple user fields in one request."""
+    _require_admin(current_user)
+
+    user = await db.scalar(select(User).where(User.id == user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields provided for update")
+
+    for key, value in updates.items():
+        setattr(user, key, value)
+
+    await db.commit()
+    await db.refresh(user)
+    return {"status": "user_updated", "updated_fields": list(updates.keys()), "user": _serialize_user(user)}
