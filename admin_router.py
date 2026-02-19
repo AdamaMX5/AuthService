@@ -193,7 +193,7 @@ async def list_users(
     """Return all users with their full persisted data."""
     _require_admin(current_user)
 
-    users = (await db.exec(select(User))).all()
+    users = (await db.scalars(select(User))).all()
     return {"status": "users_listed", "users": [_serialize_user(user) for user in users]}
 
 

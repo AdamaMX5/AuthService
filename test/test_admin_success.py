@@ -166,6 +166,8 @@ async def test_patch_user_partial_update_success(test_client, test_db):
     assert data["user"]["roles"] == ["USER", "SUPPORT"]
     assert data["user"]["permissions"]["reports"]["read"] is True
     assert data["user"]["comment"] == "updated by admin"
+
+
 async def test_set_jwt_keys_and_get_public_key_success(test_client, test_db):
     admin = make_user(id="admin_jwt", email="admin_jwt@example.com", roles=["ADMIN"])
     test_db.add(admin)

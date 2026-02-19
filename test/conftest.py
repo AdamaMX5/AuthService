@@ -17,9 +17,7 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.pool import StaticPool
 from sqlmodel import SQLModel
 
-# -------------------------------------------------
-# Projektpfad korrekt setzen
-# -------------------------------------------------
+
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
@@ -37,8 +35,9 @@ logging.getLogger("sqlalchemy.dialects").setLevel(logging.WARNING)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 # -------------------------------------------------
-# FastAPI Validation Error Handler (Debug-freundlich)
+# FastAPI Validation Error Handler
 # -------------------------------------------------
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(
@@ -56,16 +55,13 @@ async def validation_exception_handler(
         },
     )
 
-# =================================================
-# 🔥 DATABASE FIXTURES (DER WICHTIGE TEIL)
-# =================================================
 
 @pytest.fixture(scope="function")
 async def test_engine():
     """
-    Pro Test eine eigene Engine + eigene SQLite In-Memory DB.
-    -> KEIN Statement-Cache
-    -> KEIN Ghost-User
+    Each test gets his own engine + new SQLite In-Memory DB.
+    -> no Statement-Cache
+    -> no Ghost-User
     """
     engine = create_async_engine(
         "sqlite+aiosqlite://",
@@ -88,7 +84,7 @@ async def test_engine():
 @pytest.fixture(scope="function")
 async def test_db(test_engine):
     """
-    Pro Test eine frische AsyncSession.
+    Each test a new AsyncSession.
     """
     async_session = async_sessionmaker(
         bind=test_engine,
@@ -114,7 +110,7 @@ async def override_get_db(test_db):
 @pytest.fixture(scope="function")
 async def test_client(override_get_db):
     """
-    TestClient mit sauberem Dependency Override.
+    TestClient with Dependency Override.
     """
     app.dependency_overrides[get_db] = override_get_db
 

@@ -43,7 +43,6 @@ def make_refresh_token(**overrides):
     )
 
 
-
 def get_auth_headers(access_token: str) -> dict:
     return {"Authorization": f"Bearer {access_token}"}
 
