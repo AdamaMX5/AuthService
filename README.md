@@ -24,3 +24,22 @@ Paths can be overridden with env vars:
 - Set passphrase with env var: `JWT_PRIVATE_KEY_PASSPHRASE`.
 - The service uses the passphrase to validate/decode encrypted PEM private keys at signing time.
 - Store this passphrase in your secret manager (Kubernetes Secret, Vault, Doppler, etc.), **not in Git**.
+
+
+## Environment variables
+Use `.env.example` as template and copy it to `.env`.
+
+About `SECRET_KEY`:
+- If you use `ALGORITHM=RS256` (recommended), `SECRET_KEY` is not required and can be removed.
+- `SECRET_KEY` is only needed for `HS256` setups.
+
+## Docker
+Build image:
+```bash
+docker build -t authservice .
+```
+
+Run container:
+```bash
+docker run --rm -p 8000:8000 --env-file .env -v $(pwd)/keys:/app/keys authservice
+```
