@@ -1,4 +1,9 @@
+<<<<<<< codex/find-best-practices-for-private-key-security-gpb9tg
+ARG PYTHON_BASE_IMAGE=python:3.11-slim
+FROM ${PYTHON_BASE_IMAGE}
+=======
 FROM python:3.11-slim
+>>>>>>> master
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
