@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import pytest
 from fastapi import status
 
@@ -219,3 +220,104 @@ async def test_jwt_key_storage_info_admin_success(test_client, test_db):
     assert "public_key_path" in data
     assert data["private_key_loaded"] is False
     assert data["public_key_loaded"] is False
+
+
+@pytest.mark.asyncio
+async def test_import_users_creates_and_updates_by_id_when_email_matches(test_client, test_db):
+    admin = make_user(id="admin_import_1", email="admin.import1@example.com", roles=["ADMIN"])
+    existing = make_user(
+        id="u_DG9tx0",
+        email="christian@flussmark.de",
+        roles=["USER"],
+        hashed_password="old_hash",
+        is_email_verify=False,
+        is_password_verify=False,
+    )
+    test_db.add(admin)
+    test_db.add(existing)
+    await test_db.commit()
+
+    token = create_access_token({"sub": admin.email})
+    import_payload = [
+        {
+            "id": "u_DG9tx0",
+            "email": "christian@flussmark.de",
+            "email_verify": True,
+            "hashed_password": "new_hash",
+            "hash_scheme": "argon2id",
+            "password_verify": True,
+            "last_login": "2025-09-04T11:38:38",
+            "roles": ["STUDENT"],
+            "comment": "updated",
+            "deleted_at": None,
+        },
+        {
+            "id": "u_QbE3BE",
+            "email": "k.ostwald90@gmail.com",
+            "email_verify": True,
+            "hashed_password": "new_hash_2",
+            "hash_scheme": "argon2id",
+            "password_verify": True,
+            "last_login": "2025-04-11T13:07:01",
+            "roles": ["STUDENT", "MODERATOR"],
+            "comment": "",
+            "deleted_at": None,
+        },
+    ]
+
+    response = await test_client.post(
+        "/admin/users/import",
+        files={"file": ("users.json", json.dumps(import_payload), "application/json")},
+        headers=get_auth_headers(token),
+    )
+
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    assert data["status"] == "users_imported"
+    assert data["created"] == 1
+    assert data["updated"] == 1
+    assert data["skipped"] == 0
+
+    list_response = await test_client.get("/admin/users", headers=get_auth_headers(token))
+    assert_status_code(list_response, status.HTTP_200_OK)
+    users_by_id = {u["id"]: u for u in list_response.json()["users"]}
+    assert users_by_id["u_DG9tx0"]["hashed_password"] == "new_hash"
+    assert users_by_id["u_DG9tx0"]["roles"] == ["STUDENT"]
+    assert users_by_id["u_QbE3BE"]["email"] == "k.ostwald90@gmail.com"
+
+
+@pytest.mark.asyncio
+async def test_import_users_skips_when_existing_id_has_different_email(test_client, test_db):
+    admin = make_user(id="admin_import_2", email="admin.import2@example.com", roles=["ADMIN"])
+    existing = make_user(id="u_conflict", email="original@example.com", roles=["USER"])
+    test_db.add(admin)
+    test_db.add(existing)
+    await test_db.commit()
+
+    token = create_access_token({"sub": admin.email})
+    import_payload = [
+        {
+            "id": "u_conflict",
+            "email": "different@example.com",
+            "email_verify": True,
+            "hashed_password": "new_hash",
+            "password_verify": True,
+            "last_login": "2025-09-04T11:38:38",
+            "roles": ["STUDENT"],
+            "comment": "",
+            "deleted_at": None,
+        }
+    ]
+
+    response = await test_client.post(
+        "/admin/users/import",
+        files={"file": ("users.json", json.dumps(import_payload), "application/json")},
+        headers=get_auth_headers(token),
+    )
+
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    assert data["created"] == 0
+    assert data["updated"] == 0
+    assert data["skipped"] == 1
+    assert data["skipped_reasons"][0]["reason"] == "id already exists with a different email"

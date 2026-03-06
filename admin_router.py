@@ -2,8 +2,10 @@
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from pydantic import BaseModel, Field
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -54,6 +56,19 @@ class UserPatch(BaseModel):
     comment: str | None = None
     last_editor: str | None = None
     last_login: datetime | None = None
+
+
+class UserImportItem(BaseModel):
+    id: str
+    email: str
+    email_verify: bool = False
+    hashed_password: str
+    hash_scheme: str | None = None
+    password_verify: bool = False
+    last_login: datetime | None = None
+    roles: list[str] = Field(default_factory=lambda: ["USER"])
+    comment: str = ""
+    deleted_at: datetime | None = None
 
 
 def _serialize_user(user: User) -> dict[str, Any]:
@@ -237,6 +252,102 @@ async def patch_user(
     await db.commit()
     await db.refresh(user)
     return {"status": "user_updated", "updated_fields": list(updates.keys()), "user": _serialize_user(user)}
+
+
+@router.post("/users/import", status_code=status.HTTP_200_OK)
+async def import_users(
+    file: UploadFile,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Import users from a JSON file and upsert by id (with email match for updates)."""
+    _require_admin(current_user)
+
+    if file.content_type not in {"application/json", "text/json", "application/octet-stream"}:
+        raise HTTPException(status_code=400, detail="Only JSON files are supported")
+
+    try:
+        raw = await file.read()
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON file: {exc.msg}") from exc
+
+    if not isinstance(payload, list):
+        raise HTTPException(status_code=400, detail="JSON root must be a list of users")
+
+    created = 0
+    updated = 0
+    skipped = 0
+    skipped_reasons: list[dict[str, str]] = []
+
+    for idx, item in enumerate(payload, start=1):
+        try:
+            import_user = UserImportItem.model_validate(item)
+        except Exception as exc:
+            skipped += 1
+            skipped_reasons.append({"index": str(idx), "reason": f"invalid payload: {exc}"})
+            continue
+
+        existing_user = await db.scalar(select(User).where(User.id == import_user.id))
+
+        if existing_user:
+            if existing_user.email != import_user.email:
+                skipped += 1
+                skipped_reasons.append(
+                    {
+                        "id": import_user.id,
+                        "reason": "id already exists with a different email",
+                    }
+                )
+                continue
+
+            existing_user.is_email_verify = import_user.email_verify
+            existing_user.hashed_password = import_user.hashed_password
+            existing_user.is_password_verify = import_user.password_verify
+            existing_user.last_login = import_user.last_login
+            existing_user.roles = import_user.roles
+            existing_user.comment = import_user.comment
+            existing_user.deleted_at = import_user.deleted_at
+            updated += 1
+            continue
+
+        existing_by_email = await db.scalar(select(User).where(User.email == import_user.email))
+        if existing_by_email:
+            skipped += 1
+            skipped_reasons.append(
+                {
+                    "id": import_user.id,
+                    "reason": "email already exists on another user id",
+                }
+            )
+            continue
+
+        db.add(
+            User(
+                id=import_user.id,
+                email=import_user.email,
+                is_email_verify=import_user.email_verify,
+                hashed_password=import_user.hashed_password,
+                is_password_verify=import_user.password_verify,
+                roles=import_user.roles,
+                comment=import_user.comment,
+                deleted_at=import_user.deleted_at,
+                last_login=import_user.last_login,
+            )
+        )
+        created += 1
+
+    await db.commit()
+
+    return {
+        "status": "users_imported",
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "skipped_reasons": skipped_reasons,
+    }
+
+
 @router.post("/jwt/keys", status_code=status.HTTP_200_OK)
 async def set_jwt_keys(
     data: JwtKeyPair,
