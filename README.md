@@ -24,3 +24,32 @@ Paths can be overridden with env vars:
 - Set passphrase with env var: `JWT_PRIVATE_KEY_PASSPHRASE`.
 - The service uses the passphrase to validate/decode encrypted PEM private keys at signing time.
 - Store this passphrase in your secret manager (Kubernetes Secret, Vault, Doppler, etc.), **not in Git**.
+
+
+## Environment variables
+Use `.env.example` as template and copy it to `.env`.
+
+About `SECRET_KEY`:
+- If you use `ALGORITHM=RS256` (recommended), `SECRET_KEY` is not required and can be removed.
+- `SECRET_KEY` is only needed for `HS256` setups.
+
+## Docker
+Build image (default base image from Docker Hub):
+```bash
+docker build -t authservice .
+```
+
+If Docker Hub is blocked/unreliable in your network, override the base image registry:
+```bash
+docker build -t authservice --build-arg PYTHON_BASE_IMAGE=mcr.microsoft.com/devcontainers/python:1-3.11-bullseye .
+```
+
+Run container:
+```bash
+docker run --rm -p 8000:8000 --env-file .env -v $(pwd)/keys:/app/keys authservice
+```
+
+If you still get `failed to fetch anonymous token` or TLS connection resets, this is usually a network/proxy/firewall issue (not an application code issue). In that case:
+- retry on a different network,
+- configure Docker proxy settings,
+- or use a reachable mirrored/private registry via `PYTHON_BASE_IMAGE`.
