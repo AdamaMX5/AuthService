@@ -1,0 +1,17 @@
+.git
+.gitignore
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.log
+.env
+.venv
+venv
+node_modules
+.idea
+.vscode
+auth.db
+lib/auth.db
+keys/*.asc
