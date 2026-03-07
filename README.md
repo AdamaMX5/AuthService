@@ -36,7 +36,12 @@ About `SECRET_KEY`:
 ## Docker
 Build image (default base image from Docker Hub):
 ```bash
+# image erstellen und uploaden
 docker build -t authservice .
+docker push ghcr.io/adamamx5/authservice:latest
+# Server
+docker pull ghcr.io/adamamx5/authservice:latest
+docker run -d -p 8000:8000 ghcr.io/adamamx5/authservice:latest
 ```
 
 If Docker Hub is blocked/unreliable in your network, override the base image registry:
