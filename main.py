@@ -36,7 +36,7 @@ app.include_router(AdminRouter)
 @app.get("/")
 def read_root():
     """Root endpoint."""
-    return "hello Welt"
+    return "Hello world! I'm the authentication microservice."
 
 
 @app.get("/jwt/public-key")
