@@ -1,7 +1,9 @@
 #main.py
 from fastapi import FastAPI, Depends
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
+
 from user_router import router as UserRouter
 from admin_router import router as AdminRouter
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +14,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5500",  # Live Server Extension
+        "http://127.0.0.1:5500",
+        "http://localhost:3000",  # Falls SvelteKit
+        "null",  # file:// öffnet mit Origin "null"
+        "*", # Development
+    ],      # Für Dev alles erlauben
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Include routers
 app.include_router(UserRouter)
