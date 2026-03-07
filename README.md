@@ -11,14 +11,22 @@ A MicroService for Authorisation of User. Can be used in multiple Backend Projec
 ### Where are keys stored?
 - In memory after they are configured via endpoint.
 - Optionally persisted (default: `persist_to_files=true`) to:
-  - `keys/jwt_private.asc`
-  - `keys/jwt_public.asc`
+  - `keys/jwt_private.pem`
+  - `keys/jwt_public.pem`
 
 Paths can be overridden with env vars:
 - `JWT_PRIVATE_KEY_PATH`
 - `JWT_PUBLIC_KEY_PATH`
 
-> Real `.asc` key files are gitignored. Only `*.asc.example` templates are committed.
+For Linux servers, store keys on the host under `/opt/authservice/keys` and mount them into the container:
+
+```yaml
+volumes:
+  - /opt/authservice/keys:/app/keys
+```
+
+
+> Real `.pem` key files are gitignored. Only `*.pem.example` templates are committed.
 
 ### Private key passphrase
 - Set passphrase with env var: `JWT_PRIVATE_KEY_PASSPHRASE`.
@@ -51,7 +59,7 @@ docker build -t authservice --build-arg PYTHON_BASE_IMAGE=mcr.microsoft.com/devc
 
 Run container:
 ```bash
-docker run --rm -p 8000:8000 --env-file .env -v $(pwd)/keys:/app/keys authservice
+docker run --rm -p 8000:8000 --env-file .env -v /opt/authservice/keys:/app/keys authservice
 ```
 
 If you still get `failed to fetch anonymous token` or TLS connection resets, this is usually a network/proxy/firewall issue (not an application code issue). In that case:

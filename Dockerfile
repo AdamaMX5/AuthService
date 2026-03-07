@@ -2,7 +2,9 @@ ARG PYTHON_BASE_IMAGE=python:3.11-slim
 FROM ${PYTHON_BASE_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    JWT_PRIVATE_KEY_PATH=/app/keys/jwt_private.pem \
+    JWT_PUBLIC_KEY_PATH=/app/keys/jwt_public.pem
 
 WORKDIR /app
 
@@ -11,6 +13,10 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+RUN mkdir -p /app/keys
+
+VOLUME ["/app/keys"]
 
 EXPOSE 8000
 
