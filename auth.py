@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -70,6 +71,40 @@ def _load_keys_from_paths() -> None:
         JWT_PUBLIC_KEY = _read_file_if_exists(JWT_PUBLIC_KEY_PATH)
 
 
+def _generate_rsa_key_pair() -> tuple[str, str]:
+    # Generate a new RSA key pair for JWT signing and verification.
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode("utf-8")
+    return private_pem, public_pem
+
+
+def _ensure_rsa_keys_available() -> None:
+    global JWT_PRIVATE_KEY, JWT_PUBLIC_KEY
+
+    if not ALGORITHM.startswith("RS"):
+        return
+
+    _load_keys_from_paths()
+
+    if JWT_PRIVATE_KEY and JWT_PUBLIC_KEY:
+        return
+
+    private_key, public_key = _generate_rsa_key_pair()
+    JWT_PRIVATE_KEY = private_key
+    JWT_PUBLIC_KEY = public_key
+    _write_key_file(JWT_PRIVATE_KEY_PATH, private_key, private=True)
+    _write_key_file(JWT_PUBLIC_KEY_PATH, public_key, private=False)
+    logger.info("Generated JWT RSA keys because no key files were found.")
+
+
 def _validate_algorithm(algorithm: str) -> None:
     if not algorithm.startswith("RS") and algorithm != "HS256":
         raise HTTPException(
@@ -100,6 +135,7 @@ def configure_jwt_keys(
 
 def get_public_jwt_key() -> str | None:
     """Return the currently configured public JWT key."""
+    _ensure_rsa_keys_available()
     _load_keys_from_paths()
     return JWT_PUBLIC_KEY
 
@@ -120,6 +156,7 @@ def get_jwt_key_storage_info() -> dict[str, str | bool | None]:
 
 
 def _get_signing_key() -> str:
+    _ensure_rsa_keys_available()
     _load_keys_from_paths()
 
     if ALGORITHM.startswith("RS"):
@@ -140,6 +177,7 @@ def _get_signing_key() -> str:
 
 
 def _get_verification_key() -> str:
+    _ensure_rsa_keys_available()
     _load_keys_from_paths()
 
     if ALGORITHM.startswith("RS"):
