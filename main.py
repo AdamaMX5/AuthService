@@ -24,8 +24,6 @@ def read_root():
     return "hello Welt"
 
 
-
-
 @app.get("/jwt/public-key")
 async def get_jwt_public_key():
     """Public endpoint to fetch JWT public key for token verification."""
