@@ -43,6 +43,18 @@ REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", 14))
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 
+def _normalize_private_key_passphrase(passphrase: str | None) -> str | None:
+    if passphrase is None:
+        return None
+    cleaned = passphrase.strip()
+    if not cleaned or cleaned.lower() in {"null", "none"}:
+        return None
+    return cleaned
+
+
+JWT_PRIVATE_KEY_PASSPHRASE = _normalize_private_key_passphrase(JWT_PRIVATE_KEY_PASSPHRASE)
+
+
 def _read_file_if_exists(path: str | None) -> str | None:
     if not path:
         return None
@@ -169,7 +181,7 @@ def _get_signing_key() -> str:
         # Validate key and optional passphrase early
         serialization.load_pem_private_key(
             JWT_PRIVATE_KEY.encode("utf-8"),
-            password=JWT_PRIVATE_KEY_PASSPHRASE.encode("utf-8") if JWT_PRIVATE_KEY_PASSPHRASE else None,
+            password=JWT_PRIVATE_KEY_PASSPHRASE.encode("utf-8") if JWT_PRIVATE_KEY_PASSPHRASE is not None else None,
         )
         return JWT_PRIVATE_KEY
 

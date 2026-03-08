@@ -31,6 +31,7 @@ volumes:
 ### Private key passphrase
 - Set passphrase with env var: `JWT_PRIVATE_KEY_PASSPHRASE`.
 - The service uses the passphrase to validate/decode encrypted PEM private keys at signing time.
+- Auto-generated key pairs (when files are missing) are created unencrypted by default.
 - Store this passphrase in your secret manager (Kubernetes Secret, Vault, Doppler, etc.), **not in Git**.
 
 
