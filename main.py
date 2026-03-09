@@ -45,6 +45,8 @@ async def get_jwt_public_key():
     if not public_key:
         return {"status": "not_configured", "public_key": None}
 
+    public_key = "".join(public_key.splitlines())
+
     return {"status": "ok", "algorithm": get_jwt_algorithm(), "public_key": public_key}
 
 
