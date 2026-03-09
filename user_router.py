@@ -130,7 +130,7 @@ async def login_user(
     if not user.is_email_verify:
         user.email_verify_token = create_token(32)
         await send_verification_email(user.email, user.email_verify_token, user.id)
-        status_msg = "login_with_verify_email_sent"
+        status_msg = "login_with_verify_email_send"
     else:
         status_msg = "login"
 

@@ -21,8 +21,7 @@ app.add_middleware(
         "http://127.0.0.1:5500",
         "http://localhost:3000",  # Falls SvelteKit
         "null",  # file:// öffnet mit Origin "null"
-        "*", # Development
-    ],      # Für Dev alles erlauben
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
