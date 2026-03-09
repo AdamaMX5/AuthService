@@ -1,17 +1,48 @@
+# Git
 .git
 .gitignore
-.pytest_cache
+.dockerignore
+
+# Python
 __pycache__
-*.pyc
-*.pyo
-*.pyd
-*.log
-.env
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache
+.coverage
+htmlcov/
+
+# Virtual Environment
 .venv
 venv
-node_modules
+env
+ENV
+
+# IDE
 .idea
 .vscode
-auth.db
-lib/auth.db
+*.swp
+*.swo
+
+# Secrets & Config
+.env
+.env.*
+!.env.example
+keys/*.pem
 keys/*.asc
+keys/*.key
+!keys/*.example
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data/
+!data/.gitkeep
+
+# Logs
+*.log
+
+# Node (falls vorhanden)
+node_modules
