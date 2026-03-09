@@ -12,4 +12,6 @@ __pycache__
 
 # JWT key material (keep only examples in Git)
 keys/*.asc
+keys/*.pem
 !keys/*.asc.example
+!keys/*.pem.example
