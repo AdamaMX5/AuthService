@@ -16,3 +16,17 @@ def test_rs_keys_are_generated_and_used_when_missing(tmp_path):
     payload = auth.verify_jwt(token)
     assert payload is not None
     assert payload["sub"] == "user@example.com"
+
+
+def test_null_like_passphrase_is_treated_as_no_encryption():
+    auth.ALGORITHM = "RS256"
+    private_key, public_key = auth._generate_rsa_key_pair()
+    auth.JWT_PRIVATE_KEY = private_key
+    auth.JWT_PUBLIC_KEY = public_key
+    auth.JWT_PRIVATE_KEY_PASSPHRASE = auth._normalize_private_key_passphrase("null")
+
+    token = auth.create_access_token({"sub": "null-passphrase@example.com"})
+    payload = auth.verify_jwt(token)
+
+    assert payload is not None
+    assert payload["sub"] == "null-passphrase@example.com"
