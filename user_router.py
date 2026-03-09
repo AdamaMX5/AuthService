@@ -10,7 +10,7 @@ from database import get_db
 from lib.emailApi import send_verification_email, send_password_reset_email
 from models import User, Device, RefreshToken, generate_unique_id
 from auth import get_password_hash, verify_password, create_access_token, create_token, hash_token, \
-    get_current_user
+    get_current_user, build_access_token_payload
 import secrets
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -198,7 +198,11 @@ async def login_user(
         id=user.id,
         email=user.email,
         roles=user.roles,
-        access_token=create_access_token(data={"sub": str(user.id)}),
+        access_token=create_access_token(data=build_access_token_payload(
+            email=user.email,
+            roles=user.roles,
+            permissions=user.permissions,
+        )),
         status=status_msg,
         last_login=last_login,
     )
@@ -318,6 +322,11 @@ async def refresh(
     device = await db.get(Device, db_token.device_id)
     if not device:
         raise HTTPException(status_code=401, detail="Device not found")
+
+    device_owner = await db.get(User, device.user_id)
+    if not device_owner:
+        raise HTTPException(status_code=401, detail="User not found")
+
     device.last_use = datetime.utcnow()
 
     # Token Rotation
@@ -349,7 +358,11 @@ async def refresh(
         path="/user/refresh",
     )
     return {
-        "access_token": create_access_token(data={"sub": str(device.user_id)})
+        "access_token": create_access_token(data=build_access_token_payload(
+            email=device_owner.email,
+            roles=device_owner.roles,
+            permissions=device_owner.permissions,
+        ))
     }
 
 
