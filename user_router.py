@@ -54,6 +54,17 @@ async def login(
     Login user or start register process and return access/refresh tokens.
     """
     logger.info(f"find User with email: {data.email} and Device-Fingerprint: {data.device_fingerprint}")
+    logger.info(f"Login attempt for email: {data.email}")
+    logger.debug(f"Received data: {data}")
+    logger.debug(f"Password present: {bool(data.password)}")
+
+    if not hasattr(data, 'password') or not data.password:
+        logger.error("No password provided in request")
+        raise HTTPException(
+            status_code=422,
+            detail="Password field is missing or empty"
+        )
+
     user = await db.scalar(select(User).where(User.email == data.email))
     if not user:
         # Registration process started: new User-Object:
