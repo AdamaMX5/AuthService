@@ -30,3 +30,20 @@ def test_null_like_passphrase_is_treated_as_no_encryption():
 
     assert payload is not None
     assert payload["sub"] == "null-passphrase@example.com"
+
+
+def test_build_access_token_payload_contains_email_roles_permissions():
+    payload = auth.build_access_token_payload(
+        email="claims@example.com",
+        roles=["USER", "ADMIN"],
+        permissions={"reports": {"read": True}},
+    )
+
+    token = auth.create_access_token(payload)
+    decoded = auth.verify_jwt(token)
+
+    assert decoded is not None
+    assert decoded["sub"] == "claims@example.com"
+    assert decoded["email"] == "claims@example.com"
+    assert decoded["roles"] == ["USER", "ADMIN"]
+    assert decoded["permissions"]["reports"]["read"] is True

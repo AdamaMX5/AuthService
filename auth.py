@@ -228,6 +228,16 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
+def build_access_token_payload(*, email: str, roles: list[str] | None = None, permissions: dict | None = None) -> dict:
+    """Build a normalized payload for access tokens."""
+    return {
+        "sub": email,
+        "email": email,
+        "roles": list(roles or []),
+        "permissions": permissions or {},
+    }
+
+
 def verify_jwt(token: str) -> Union[dict, None]:
     if token is None:
         return None
