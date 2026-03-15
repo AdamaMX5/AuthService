@@ -3,7 +3,6 @@ import pytest
 from fastapi import status
 from datetime import datetime, timedelta
 from unittest.mock import patch, AsyncMock
-from sqlalchemy.future import select
 
 from models import User, Device, RefreshToken
 from auth import get_password_hash, verify_password, hash_token, get_current_user
@@ -31,7 +30,7 @@ class TestUserRouterSuccess:
         # Act
         response = await test_client.post("/user/login", json=login_data)
 
-        # Assert with message: assert data["status"] == "register", f"Expected register but got {data["status"]}"
+        # Assert
         assert_status_code(response, status.HTTP_200_OK)
         data = response.json()
         assert data["status"] == "register"
@@ -40,9 +39,7 @@ class TestUserRouterSuccess:
         assert data["roles"] == []
 
         # Verify User wurde in DB erstellt
-        user = await test_db.scalar(
-            select(User).where(User.email == "newuser@example.com")
-        )
+        user = await User.find_one(User.email == "newuser@example.com")
         assert user is not None
         assert user.is_password_verify is False
         assert user.is_email_verify is False
@@ -57,9 +54,7 @@ class TestUserRouterSuccess:
             email="verified@example.com",
             password="correctPassword123!",
         )
-        test_db.add(user)
-        await test_db.commit()
-        await test_db.refresh(user)
+        await user.insert()
 
         login_data = {
             "email": "verified@example.com",
@@ -79,8 +74,7 @@ class TestUserRouterSuccess:
         assert "USER" in data["roles"]
 
         # Verify last_login is updated
-        # Verify last_login updated
-        await test_db.refresh(user)
+        user = await User.get("test_user_123")
         assert user.last_login > (datetime.utcnow() - timedelta(minutes=1))
 
     @pytest.mark.asyncio
@@ -92,8 +86,7 @@ class TestUserRouterSuccess:
             email="device@example.com",
             password="devicePassword123!",
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         login_data = {
             "email": "device@example.com",
@@ -109,10 +102,9 @@ class TestUserRouterSuccess:
         assert_status_code(response, status.HTTP_200_OK)
 
         # Verify Device wurde gespeichert
-        device = await test_db.scalar(
-            select(Device)
-            .where(Device.user_id == "device_user_123")
-            .where(Device.fingerprint == "unique_device_123")
+        device = await Device.find_one(
+            Device.user_id == "device_user_123",
+            Device.fingerprint == "unique_device_123",
         )
         assert device is not None
         assert device.name == "My Chrome Browser"
@@ -129,8 +121,7 @@ class TestUserRouterSuccess:
             is_password_verify=True,
             is_email_verify=False,  # Email nicht verifiziert
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         login_data = {
             "email": "unverified@example.com",
@@ -145,11 +136,11 @@ class TestUserRouterSuccess:
             # Assert
             assert_status_code(response, status.HTTP_200_OK)
             data = response.json()
-            assert data["status"] == "login_with_verify_email_sent"
+            assert data["status"] == "login_with_verify_email_send"
 
             # Verify Email wurde gesendet
             mock_send.assert_called_once()
-            await test_db.refresh(user)
+            user = await User.get("verify_user_123")
             assert user.email_verify_token is not None
 
     @pytest.mark.asyncio
@@ -161,7 +152,7 @@ class TestUserRouterSuccess:
             email="existing@example.com",
             password="password123!",
         )
-        test_db.add(user)
+        await user.insert()
 
         # Vorhandenes Device erstellen
         old_time = datetime.utcnow() - timedelta(days=7)
@@ -171,8 +162,7 @@ class TestUserRouterSuccess:
             fingerprint="existing_fingerprint",
             last_use=old_time
         )
-        test_db.add(device)
-        await test_db.commit()
+        await device.insert()
 
         login_data = {
             "email": "existing@example.com",
@@ -187,7 +177,7 @@ class TestUserRouterSuccess:
         assert_status_code(response, status.HTTP_200_OK)
 
         # Verify Device last_use wurde aktualisiert
-        await test_db.refresh(device)
+        device = await Device.get("existing_device_123")
         assert device.last_use > old_time
 
     @pytest.mark.asyncio
@@ -202,8 +192,7 @@ class TestUserRouterSuccess:
             is_email_verify=False,
             roles=[],
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         register_data = {
             "email": "register@example.com",
@@ -222,10 +211,10 @@ class TestUserRouterSuccess:
             assert data["email"] == "register@example.com"
             assert "access_token" in data
             assert data["access_token"] != ""
-            assert data["status"] == "login_with_verify_email_sent"
+            assert data["status"] == "login_with_verify_email_send"
 
             # Verify User wurde aktualisiert
-            await test_db.refresh(user)
+            user = await User.get("register_user_123")
             assert user.is_password_verify is True
             assert user.email_verify_token is not None
             assert "USER" in user.roles
@@ -242,8 +231,7 @@ class TestUserRouterSuccess:
             is_email_verify=False,
             roles=[],
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         register_data = {
             "email": "first@example.com",
@@ -258,7 +246,7 @@ class TestUserRouterSuccess:
             assert_status_code(response, status.HTTP_201_CREATED)
 
             # Verify User hat ADMIN und USER Rolle
-            await test_db.refresh(user)
+            user = await User.get("first_user_123")
             assert "ADMIN" in user.roles
             assert "USER" in user.roles
 
@@ -272,7 +260,7 @@ class TestUserRouterSuccess:
             password="adminPassword123!",
             roles=["ADMIN", "USER"],
         )
-        test_db.add(admin_user)
+        await admin_user.insert()
 
         new_user = make_user(
             id="new_user_456",
@@ -282,8 +270,7 @@ class TestUserRouterSuccess:
             is_email_verify=False,
             roles=[],
         )
-        test_db.add(new_user)
-        await test_db.commit()
+        await new_user.insert()
 
         register_data = {
             "email": "newuser@example.com",
@@ -299,10 +286,9 @@ class TestUserRouterSuccess:
             assert_status_code(response, status.HTTP_201_CREATED)
 
             # Verify neuer User ist NICHT Admin
-            await test_db.refresh(new_user)
+            new_user = await User.get("new_user_456")
             assert "ADMIN" not in new_user.roles
             assert "USER" in new_user.roles
-
 
     @pytest.mark.asyncio
     async def test_verify_email_success(self, test_client, test_db):
@@ -315,8 +301,7 @@ class TestUserRouterSuccess:
             email_verify_token="valid_token_123",
             is_email_verify=False,
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         # Act
         response = await test_client.get(
@@ -330,7 +315,7 @@ class TestUserRouterSuccess:
         assert data["status"] == "email_verified"
 
         # Verify User wurde aktualisiert
-        await test_db.refresh(user)
+        user = await User.get("verify_me_123")
         assert user.is_email_verify is True
         assert user.email_verify_token is None
 
@@ -343,8 +328,7 @@ class TestUserRouterSuccess:
             password="verifyedEmail123!",
             email_verify_token="any_token",
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         # Act
         response = await test_client.get(
@@ -368,8 +352,7 @@ class TestUserRouterSuccess:
             email="reset@example.com",
             password="toResetPassword123!",
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         # Mock send_password_reset_email
         with patch("user_router.send_password_reset_email") as mock_send:
@@ -384,7 +367,7 @@ class TestUserRouterSuccess:
             mock_send.assert_called_once()
 
             # Verify Token wurde gesetzt
-            await test_db.refresh(user)
+            user = await User.get("reset_user_123")
             assert user.password_reset_token is not None
 
     @pytest.mark.asyncio
@@ -397,8 +380,7 @@ class TestUserRouterSuccess:
             password_reset_token="valid_reset_token",
             hashed_password="old_hashed_password",
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         old_password_hash = user.hashed_password
 
@@ -419,14 +401,21 @@ class TestUserRouterSuccess:
         assert data["status"] == "password_reset"
 
         # Verify Passwort wurde geändert
-        await test_db.refresh(user)
+        user = await User.get("changepw_user_123")
         assert user.hashed_password != old_password_hash
         assert user.password_reset_token is None
 
     @pytest.mark.asyncio
     async def test_refresh_token_success(self, test_client, test_db):
         """Test: Erfolgreiches Token-Refresh"""
-        # Arrange
+        # Arrange - User erstellen
+        user = make_user(
+            id="refresh_user_123",
+            email="refresh@example.com",
+            password="password123!",
+        )
+        await user.insert()
+
         # Device erstellen
         device = Device(
             id="refresh_device_123",
@@ -434,7 +423,7 @@ class TestUserRouterSuccess:
             fingerprint="refresh_fingerprint",
             last_use=datetime.utcnow() - timedelta(days=1)
         )
-        test_db.add(device)
+        await device.insert()
 
         # Refresh Token erstellen (noch nicht abgelaufen)
         refresh_token = RefreshToken(
@@ -445,11 +434,7 @@ class TestUserRouterSuccess:
             expires_at=datetime.utcnow() + timedelta(days=6),
             revoked=False
         )
-        test_db.add(refresh_token)
-        await test_db.commit()
-
-        def fake_hash_token(token: str):
-            return f"hash_{token}"
+        await refresh_token.insert()
 
         # Mock hash_token um korrekten Hash zurückzugeben
         with patch("user_router.create_token", return_value="new_refresh_token"):
@@ -465,16 +450,15 @@ class TestUserRouterSuccess:
                 assert data["access_token"] == "new_access_token"
 
                 # Verify Token Rotation
-                await test_db.refresh(refresh_token)
-                assert refresh_token.revoked is True
+                old_token = await RefreshToken.get("refresh_token_123")
+                assert old_token.revoked is True
 
                 # Neuer Token sollte existieren
-                new_tokens = await test_db.scalars(
-                    select(RefreshToken)
-                    .where(RefreshToken.device_id == "refresh_device_123")
-                    .where(RefreshToken.revoked == False)
+                new_token = await RefreshToken.find_one(
+                    RefreshToken.device_id == "refresh_device_123",
+                    RefreshToken.revoked == False,
                 )
-                assert new_tokens.first() is not None
+                assert new_token is not None
 
     @pytest.mark.asyncio
     async def test_logout_success_with_token(self, test_client, test_db):
@@ -485,7 +469,7 @@ class TestUserRouterSuccess:
             fingerprint="logout_fingerprint",
             last_use=datetime.utcnow() - timedelta(days=1)
         )
-        test_db.add(device)
+        await device.insert()
 
         refresh_token = RefreshToken(
             id="logout_token_123",
@@ -494,8 +478,7 @@ class TestUserRouterSuccess:
             expires_at=datetime.utcnow() + timedelta(days=7),
             revoked=False
         )
-        test_db.add(refresh_token)
-        await test_db.commit()
+        await refresh_token.insert()
 
         with patch("user_router.hash_token", return_value="logout_token_hash"):
             # Act
@@ -510,8 +493,8 @@ class TestUserRouterSuccess:
             assert data["status"] == "logged_out"
 
             # Verify Token wurde revoked
-            await test_db.refresh(refresh_token)
-            assert refresh_token.revoked is True
+            token = await RefreshToken.get("logout_token_123")
+            assert token.revoked is True
 
     @pytest.mark.asyncio
     async def test_logout_success_without_token(self, test_client, test_db):
@@ -531,20 +514,19 @@ class TestUserRouterSuccess:
             email="logoutall@example.com",
             password="password123!",
         )
-        test_db.add(user)
+        await user.insert()
 
         # create two devices for the user
         device1 = Device(id="device1", user_id=user.id, fingerprint="fingerprint1", last_use=datetime.utcnow() - timedelta(days=1))
         device2 = Device(id="device2", user_id=user.id, fingerprint="fingerprint2", last_use=datetime.utcnow() - timedelta(days=1))
-        test_db.add(device1)
-        test_db.add(device2)
+        await device1.insert()
+        await device2.insert()
 
         # create two refresh tokens for the devices
         token1 = RefreshToken(id="token1", device_id="device1", token_hash=hash_token("token_1"), expires_at=datetime.utcnow() + timedelta(days=6), revoked=False)
         token2 = RefreshToken(id="token2", device_id="device2", token_hash=hash_token("token_2"), expires_at=datetime.utcnow() + timedelta(days=6), revoked=False)
-        test_db.add(token1)
-        test_db.add(token2)
-        await test_db.commit()
+        await token1.insert()
+        await token2.insert()
 
         def override_get_current_user():
             return user
@@ -559,14 +541,11 @@ class TestUserRouterSuccess:
         assert_status_code(response, status.HTTP_200_OK)
         assert response.json()["status"] == "logged_out_all", f"Expected status 'logged_out_all', but got {response.json()['status']}"
 
-        test_db.expire_all()
-        tokens = await test_db.scalars(
-            select(RefreshToken).where(
-                RefreshToken.device_id.in_(["device1", "device2"])
-            )
-        )
-        for token in tokens:
-            assert token.revoked is True, f"Expected token.revoked == true, but token is {token}"
+        # Verify all tokens are revoked
+        t1 = await RefreshToken.get("token1")
+        t2 = await RefreshToken.get("token2")
+        assert t1.revoked is True, f"Expected token1.revoked == true, but token is {t1}"
+        assert t2.revoked is True, f"Expected token2.revoked == true, but token is {t2}"
 
     @pytest.mark.asyncio
     async def test_login_without_device_info_generates_fingerprint(self, test_client, test_db):
@@ -576,8 +555,7 @@ class TestUserRouterSuccess:
             email="nodevice@example.com",
             password="password123!",
         )
-        test_db.add(user)
-        await test_db.commit()
+        await user.insert()
 
         login_data = {
             "email": "nodevice@example.com",
@@ -594,11 +572,7 @@ class TestUserRouterSuccess:
             assert_status_code(response, status.HTTP_200_OK)
 
             # Verify Device was created with generated fingerprint
-            test_db.expire_all()
-            device = await test_db.scalar(
-                select(Device)
-                .where(Device.user_id == "no_device_user")
-            )
+            device = await Device.find_one(Device.user_id == "no_device_user")
             assert device is not None, f"Expected a server generated device for user 'no_device_user' but device = none."
             assert device.fingerprint == "generated_fingerprint_123", f"Expected fingerprint 'generated_fingerprint_123' but got {device.fingerprint}"
             assert device.name == "Unknown Device", f"Expected device name 'Unknown Device' but got {device.name}"
@@ -611,10 +585,7 @@ class TestUserRouterSuccess:
             email="multilogin@example.com",
             password="password123!",
         )
-
-        test_db.add(user)
-        await test_db.commit()
-        test_db.refresh(user)
+        await user.insert()
 
         login_data = {
             "email": "multilogin@example.com",
@@ -627,25 +598,16 @@ class TestUserRouterSuccess:
         assert_status_code(response, status.HTTP_200_OK)
 
         # Device Count after first login
-        test_db.expire_all()
-        devices = await test_db.scalars(
-            select(Device)
-            .where(Device.user_id == "multi_login_user")
-        )
-        device_list = list(devices.all())
+        device_list = await Device.find(Device.user_id == "multi_login_user").to_list()
         assert len(device_list) == 1, f"Expected 1 device for user 'multi_login_user' after first login, but got {len(device_list)}"
 
-        # secound Login with same fingerprint
+        # second Login with same fingerprint
         response2 = await test_client.post("/user/login", json=login_data)
         assert_status_code(response2, status.HTTP_200_OK)
 
         # Device Count should still be 1, not 2
-        devices = await test_db.scalars(
-            select(Device)
-            .where(Device.user_id == "multi_login_user")
-        )
-        device_list = list(devices.all())
-        assert len(device_list) == 1, f"Expected still olny 1 device for user 'multi_login_user' after second login but got {len(device_list)}, maybe 2 new random fingerprint was generated instead of using the provided one?"
+        device_list = await Device.find(Device.user_id == "multi_login_user").to_list()
+        assert len(device_list) == 1, f"Expected still only 1 device for user 'multi_login_user' after second login but got {len(device_list)}, maybe 2 new random fingerprint was generated instead of using the provided one?"
 
         device = device_list[0]
         assert device.fingerprint == "same_fingerprint", f"Expected device fingerprint 'same_fingerprint' but got {device.fingerprint}, maybe a random fingerprint was generated instead of using the provided one?"

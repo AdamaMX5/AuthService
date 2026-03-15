@@ -1,12 +1,10 @@
 # user_router.py
 import limiter
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request, Cookie
-from sqlmodel import select, update
-from sqlmodel.ext.asyncio.session import AsyncSession
 from datetime import datetime, timedelta
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr, validator
-from database import get_db
+
 from lib.emailApi import send_verification_email, send_password_reset_email
 from models import User, Device, RefreshToken, generate_unique_id
 from auth import get_password_hash, verify_password, create_access_token, create_token, hash_token, \
@@ -48,7 +46,6 @@ async def login(
         data: UserLogin,
         request: Request,
         response: Response,
-        db: AsyncSession = Depends(get_db),
 ):
     """
     Login user or start register process and return access/refresh tokens.
@@ -65,19 +62,18 @@ async def login(
             detail="Password field is missing or empty"
         )
 
-    user = await db.scalar(select(User).where(User.email == data.email))
+    user = await User.find_one(User.email == data.email)
     if not user:
         # Registration process started: new User-Object:
-        new_user = User(email=data.email)
-        new_user.id = await generate_unique_id(db, User)
-        new_user.last_login = datetime.utcnow()
-        new_user.hashed_password = get_password_hash(data.password)
-        new_user.is_password_verify = False
-        new_user.is_email_verify = False
-
-        db.add(new_user)
-        await db.commit()
-        await db.refresh(new_user)
+        new_user = User(
+            id=await generate_unique_id(User),
+            email=data.email,
+            last_login=datetime.utcnow(),
+            hashed_password=get_password_hash(data.password),
+            is_password_verify=False,
+            is_email_verify=False,
+        )
+        await new_user.insert()
 
         logger.warning(f"New User created and registration process is started: {new_user}")
         return UserLoginResponse(
@@ -105,7 +101,6 @@ async def login(
         password=data.password,
         request=request,
         response=response,
-        db=db,
         device_fingerprint=data.device_fingerprint,
         device_name=data.device_name,
     )
@@ -117,7 +112,6 @@ async def login_user(
     password: str,
     request: Request,
     response: Response,
-    db: AsyncSession,
     device_fingerprint: str | None = None,
     device_name: str | None = None,
 ) -> UserLoginResponse:
@@ -140,14 +134,13 @@ async def login_user(
     logger.warning(f"device_fingerprint in login_user() = {device_fingerprint!r}. Request.Headers: {request.headers}, IP-Adress: {ip_address}")
     device = None
     if device_fingerprint:
-        device = await db.scalar(
-            select(Device)
-            .where(Device.fingerprint == device_fingerprint)
-            .where(Device.user_id == user.id)
+        device = await Device.find_one(
+            Device.fingerprint == device_fingerprint,
+            Device.user_id == user.id,
         )
     if not device:
         device = Device(
-            id=await generate_unique_id(db, Device),
+            id=await generate_unique_id(Device),
             user_id=user.id,
             fingerprint=device_fingerprint or create_token(32),
             name=device_name or "Unknown Device",
@@ -160,10 +153,10 @@ async def login_user(
             first_use=datetime.utcnow(),
             last_use=datetime.utcnow(),
         )
-        db.add(device)
-        await db.flush()  # device.id will be generated
+        await device.insert()
     else:
         device.last_use = datetime.utcnow()
+        await device.replace()
     logger.warning(f"Device for user {user.email}: {device}")
 
     # Refresh Token Handling (Opaque Token),
@@ -172,16 +165,15 @@ async def login_user(
     refresh_token = create_token(64)
     refresh_token_hash = hash_token(refresh_token)
     refresh_token_db = RefreshToken(
-        id=await generate_unique_id(db, RefreshToken),
+        id=await generate_unique_id(RefreshToken),
         device_id=device.id,
         token_hash=refresh_token_hash,
         issued_at=datetime.utcnow(),
         expires_at=datetime.utcnow() + timedelta(days=7),
         revoked=False,
     )
-    db.add(refresh_token_db)
-    await db.commit()
-    await db.refresh(user)
+    await refresh_token_db.insert()
+    await user.replace()
     logger.info(f"User {user.email} logged in successfully. last login old was {last_login}, actual last_login is {user.last_login}")
 
     # HttpOnly-Cookie for Refresh Token (Browser stores it automatically, JavaScript do not see it -> more Secure)
@@ -210,15 +202,14 @@ async def login_user(
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 @limiter.limit(rate=3)
-async def register_user(data: UserRegister, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
-    user = await db.scalar(select(User).where(User.email == data.email))
+async def register_user(data: UserRegister, request: Request, response: Response):
+    user = await User.find_one(User.email == data.email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.is_password_verify:
         raise HTTPException(status_code=400, detail="User is already registered")
     if not verify_password(data.repassword, user.hashed_password):
-        await db.delete(user)
-        await db.commit()
+        await user.delete()
         raise HTTPException(status_code=400, detail="Second Password is incorrect, please try registration again.")
 
     user.is_password_verify = True
@@ -232,11 +223,7 @@ async def register_user(data: UserRegister, request: Request, response: Response
         logger.info("Assigning USER role to newly registered user, after checking repassword is correct")
 
     # give Admin-role when no user is Admin
-    admin_exists = await db.scalar(
-        select(User.id)
-        .where(User.deleted_at == None)
-        .where(User.roles.like('%"ADMIN"%'))
-    )
+    admin_exists = await User.find_one({"deleted_at": None, "roles": "ADMIN"})
     logger.info(f"Admin already exists check during registration of a user: {admin_exists}")
 
     if not admin_exists:
@@ -244,23 +231,21 @@ async def register_user(data: UserRegister, request: Request, response: Response
         roles.append("ADMIN")
     user.roles = roles
 
-    await db.commit()
-    await db.refresh(user)
+    await user.replace()
 
     return await login_user(
         user=user,
         password=data.repassword,
         request=request,
         response=response,
-        db=db,
         device_fingerprint=data.device_fingerprint,
         device_name=data.device_name,
     )
 
 
 @router.get("/verify-email")
-async def verify_email(token: str, user_id: str, db: AsyncSession = Depends(get_db)):
-    user = await db.get(User, user_id)
+async def verify_email(token: str, user_id: str):
+    user = await User.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.is_email_verify:
@@ -271,14 +256,14 @@ async def verify_email(token: str, user_id: str, db: AsyncSession = Depends(get_
     user.is_email_verify = True
     user.email_verify_token = None
     user.edited(editor=user.email, comment="Email verified")
-    await db.commit()
+    await user.replace()
     return {"status": "email_verified"}
 
 
 @router.post("/reset-password")
 @limiter.limit(rate=3)
-async def reset_password(token: str, user_id: str, new_password: str, repassword:str, db: AsyncSession = Depends(get_db)):
-    user = await db.get(User, user_id)
+async def reset_password(token: str, user_id: str, new_password: str, repassword: str):
+    user = await User.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.password_reset_token != token:
@@ -288,7 +273,7 @@ async def reset_password(token: str, user_id: str, new_password: str, repassword
 
     user.hashed_password = get_password_hash(new_password)
     user.password_reset_token = None
-    await db.commit()
+    await user.replace()
     return {"status": "password_reset"}
 
 
@@ -297,7 +282,6 @@ async def reset_password(token: str, user_id: str, new_password: str, repassword
 async def refresh(
     response: Response,
     refresh_token: str | None = Cookie(default=None),
-    db: AsyncSession = Depends(get_db),
 ):
     logger.info(f"Refreshing access token using refresh token from cookie: {refresh_token}")
     if not refresh_token:
@@ -306,10 +290,7 @@ async def refresh(
     token_hash = hash_token(refresh_token)
     logger.info(f"Computed hash of refresh token: {token_hash} = hash_token({refresh_token})")
     # load refresh token
-    db_token = await db.scalar(
-        select(RefreshToken)
-        .where(RefreshToken.token_hash == token_hash)
-    )
+    db_token = await RefreshToken.find_one(RefreshToken.token_hash == token_hash)
     if not db_token:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     if db_token.expires_at < datetime.utcnow():
@@ -319,22 +300,23 @@ async def refresh(
         raise HTTPException(status_code=401, detail="Refresh token revoked")
 
     # load device
-    device = await db.get(Device, db_token.device_id)
+    device = await Device.get(db_token.device_id)
     if not device:
         raise HTTPException(status_code=401, detail="Device not found")
 
-    device_owner = await db.get(User, device.user_id)
+    device_owner = await User.get(device.user_id)
     if not device_owner:
         raise HTTPException(status_code=401, detail="User not found")
 
     device.last_use = datetime.utcnow()
+    await device.replace()
 
     # Token Rotation
     new_refresh_token = create_token(64)
     new_refresh_hash = hash_token(new_refresh_token)
 
     new_db_token = RefreshToken(
-        id=await generate_unique_id(db, RefreshToken),
+        id=await generate_unique_id(RefreshToken),
         device_id=device.id,
         token_hash=new_refresh_hash,
         issued_at=datetime.utcnow(),
@@ -342,10 +324,10 @@ async def refresh(
         revoked=False,
         rotated_from=db_token.id,
     )
-    db.add(new_db_token)
     # lock old Token
     db_token.revoked = True
-    await db.commit()
+    await db_token.replace()
+    await new_db_token.insert()
 
     # save new RefreshToken in Cookie
     response.set_cookie(
@@ -368,12 +350,12 @@ async def refresh(
 
 @router.post("/password-reset-request")
 @limiter.limit(rate=1)
-async def password_reset_request(email: EmailStr, db: AsyncSession = Depends(get_db)):
-    user = await db.scalar(select(User).where(User.email == email))
+async def password_reset_request(email: EmailStr):
+    user = await User.find_one(User.email == email)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.password_reset_token = create_token(32)
-    await db.commit()
+    await user.replace()
     await send_password_reset_email(
         user.email,
         user.password_reset_token,
@@ -385,19 +367,17 @@ async def password_reset_request(email: EmailStr, db: AsyncSession = Depends(get
 async def logout(
     response: Response,
     refresh_token: str | None = Cookie(default=None),
-    db: AsyncSession = Depends(get_db),
 ):
     if refresh_token:
         token_hash = hash_token(refresh_token)
-        db_token = await db.scalar(
-            select(RefreshToken)
-            .where(RefreshToken.token_hash == token_hash)
-            .where(RefreshToken.revoked == False)
+        db_token = await RefreshToken.find_one(
+            RefreshToken.token_hash == token_hash,
+            RefreshToken.revoked == False,
         )
         if db_token:
             db_token.revoked = True
+            await db_token.replace()
 
-    await db.commit()
     # delete Cookie
     response.delete_cookie(
         key="refresh_token",
@@ -410,19 +390,15 @@ async def logout(
 async def logout_all(
     response: Response,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ):
-    await db.execute(
-        update(RefreshToken)
-        .where(
-            RefreshToken.device_id.in_(
-                select(Device.id).where(Device.user_id == user.id)
-            )
-        )
-        .values(revoked=True)
-    )
+    devices = await Device.find(Device.user_id == user.id).to_list()
+    device_ids = [d.id for d in devices]
 
-    await db.commit()
+    if device_ids:
+        await RefreshToken.get_motor_collection().update_many(
+            {"device_id": {"$in": device_ids}},
+            {"$set": {"revoked": True}},
+        )
 
     response.delete_cookie(
         key="refresh_token",

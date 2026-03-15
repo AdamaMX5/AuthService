@@ -1,19 +1,26 @@
 #main.py
-from fastapi import FastAPI, Depends
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
 
 from user_router import router as UserRouter
 from admin_router import router as AdminRouter
-from sqlalchemy.ext.asyncio import AsyncSession
-from database import get_db
+from database import init_db
 from auth import get_jwt_algorithm, get_public_jwt_key
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -51,30 +58,19 @@ async def get_jwt_public_key():
 
 
 @app.get("/db_health")
-async def check_database_health(db: AsyncSession = Depends(get_db)):
-    """Check database health."""
+async def check_database_health():
+    """Check MongoDB health."""
+    from database import _client, MONGODB_DB_NAME
+    from models import User
     try:
-        # Test connection
-        await db.exec(text("SELECT 1"))
-
-        # Get list of tables
-        result = await db.exec(
-            text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        )
-        tables = result.all()
-
-        # Count users if users table exists
-        user_count = 0
-        if any(table[0] == 'users' for table in tables):
-            result = await db.exec(text("SELECT COUNT(*) FROM users"))
-            count_result = result.first()
-            user_count = count_result[0] if count_result else 0
-
+        await _client.admin.command("ping")
+        collections = await _client[MONGODB_DB_NAME].list_collection_names()
+        user_count = await User.count()
         return {
             "status": "healthy",
             "database": "connected",
-            "tables": [table[0] for table in tables],
-            "user_count": user_count
+            "collections": collections,
+            "user_count": user_count,
         }
     except Exception as e:
         logger.error(f"Database health check failed: {e}")
@@ -82,151 +78,95 @@ async def check_database_health(db: AsyncSession = Depends(get_db)):
             "status": "unhealthy",
             "database": "disconnected",
             "error": str(e),
-            "tables": [],
-            "user_count": 0
+            "collections": [],
+            "user_count": 0,
         }
 
 
 @app.get("/create_tables")
-async def create_tables_endpoint(db: AsyncSession = Depends(get_db)):
-    """Create database tables."""
-    from database import init_db
+async def create_tables_endpoint():
+    """Re-initialize Beanie (recreates indexes)."""
     try:
         success = await init_db()
         if success:
-            return {"status": "success", "message": "Tables created successfully"}
+            return {"status": "success", "message": "Beanie initialized and indexes created"}
         else:
-            return {"status": "error", "message": "Failed to create tables"}
+            return {"status": "error", "message": "Failed to initialize Beanie"}
     except Exception as e:
-        logger.error(f"Manual table creation failed: {e}")
+        logger.error(f"Initialization failed: {e}")
         return {"status": "error", "message": str(e)}
 
 
 @app.get("/drop_tables")
-async def drop_tables_endpoint(db: AsyncSession = Depends(get_db)):
-    """Drop all tables (DANGEROUS - for development only!)."""
+async def drop_tables_endpoint():
+    """Drop all MongoDB collections (DANGEROUS - for development only!)."""
+    from models import User, Device, RefreshToken
     try:
-        # Get all tables
-        result = await db.exec(
-            text("SELECT name FROM sqlite_master WHERE type='table'")
-        )
-        tables = result.all()
-
-        # Drop each table
-        dropped_tables = []
-        for table in tables:
-            table_name = table[0]
-            if table_name != 'sqlite_sequence':  # Skip SQLite sequence table
-                await db.exec(text(f"DROP TABLE IF EXISTS {table_name}"))
-                dropped_tables.append(table_name)
-
-        await db.commit()
-
-        logger.warning(f"Dropped tables: {dropped_tables}")
+        dropped = []
+        for model in [User, Device, RefreshToken]:
+            collection_name = model.Settings.name
+            await model.get_motor_collection().drop()
+            dropped.append(collection_name)
+        logger.warning(f"Dropped collections: {dropped}")
         return {
             "status": "success",
-            "message": f"Dropped {len(dropped_tables)} tables",
-            "dropped_tables": dropped_tables
+            "message": f"Dropped {len(dropped)} collections",
+            "dropped_collections": dropped,
         }
     except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to drop tables: {e}")
+        logger.error(f"Failed to drop collections: {e}")
         return {"status": "error", "message": str(e)}
 
 
 @app.get("/tables_info")
-async def get_tables_info(db: AsyncSession = Depends(get_db)):
-    """Get detailed information about all tables."""
+async def get_tables_info():
+    """Get stats for all MongoDB collections."""
+    from database import _client, MONGODB_DB_NAME
+    from models import User, Device, RefreshToken
     try:
-        # Get all tables
-        result = await db.exec(
-            text("""
-                SELECT name, sql 
-                FROM sqlite_master 
-                WHERE type='table' 
-                ORDER BY name
-            """)
-        )
-        tables = result.all()
-
-        table_info = []
-        for table_name, table_sql in tables:
-            # Get row count for each table
-            if table_name != 'sqlite_sequence':
-                count_result = await db.exec(
-                    text(f"SELECT COUNT(*) FROM {table_name}")
-                )
-                count_row = count_result.first()
-                row_count = count_row[0] if count_row else 0
-
-                # Get column info
-                columns_result = await db.exec(
-                    text(f"PRAGMA table_info({table_name})")
-                )
-                columns = columns_result.all()
-
-                table_info.append({
-                    "name": table_name,
-                    "row_count": row_count,
-                    "sql": table_sql,
-                    "columns": [
-                        {
-                            "name": col[1],
-                            "type": col[2],
-                            "not_null": bool(col[3]),
-                            "primary_key": bool(col[5])
-                        }
-                        for col in columns
-                    ]
-                })
-
+        db = _client[MONGODB_DB_NAME]
+        collection_infos = []
+        for model in [User, Device, RefreshToken]:
+            collection_name = model.Settings.name
+            count = await model.count()
+            indexes = await model.get_motor_collection().index_information()
+            collection_infos.append({
+                "name": collection_name,
+                "document_count": count,
+                "indexes": list(indexes.keys()),
+            })
         return {
             "status": "success",
-            "tables": table_info,
-            "total_tables": len(table_info)
+            "collections": collection_infos,
+            "total_collections": len(collection_infos),
         }
-
     except Exception as e:
-        logger.error(f"Failed to get table info: {e}")
+        logger.error(f"Failed to get collection info: {e}")
         return {"status": "error", "message": str(e)}
 
 
 @app.get("/simple_tables_html", response_class=HTMLResponse)
-async def get_simple_tables_html(db: AsyncSession = Depends(get_db)):
-    """Simple HTML version of all tables."""
+async def get_simple_tables_html():
+    """Simple HTML view of all MongoDB collections."""
+    from models import User, Device, RefreshToken
     try:
-        result = await db.exec(
-            text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
-        )
-        tables = result.all()
+        html = "<html><body><h1>MongoDB Collections</h1>"
 
-        html = "<html><body><h1>Database Tables</h1>"
+        for model in [User, Device, RefreshToken]:
+            collection_name = model.Settings.name
+            html += f"<h2>Collection: {collection_name}</h2>"
+            docs = await model.find_all().to_list()
 
-        for table in tables:
-            table_name = table[0]
-            html += f"<h2>Table: {table_name}</h2>"
-
-            # Get data
-            data_result = await db.exec(text(f"SELECT * FROM {table_name}"))
-            data = data_result.all()
-
-            if data:
+            if docs:
                 html += "<table border='1'>"
-                # Header
-                html += "<tr>"
-                for column in data[0]._fields:
-                    html += f"<th>{column}</th>"
-                html += "</tr>"
-
-                # Rows
-                for row in data:
-                    html += "<tr>"
-                    for cell in row:
-                        html += f"<td>{cell}</td>"
-                    html += "</tr>"
+                fields = list(docs[0].model_fields.keys())
+                html += "<tr>" + "".join(f"<th>{f}</th>" for f in fields) + "</tr>"
+                for doc in docs:
+                    row_data = doc.model_dump()
+                    html += "<tr>" + "".join(f"<td>{row_data.get(f)}</td>" for f in fields) + "</tr>"
                 html += "</table>"
             else:
-                html += "<p>Empty table</p>"
+                html += "<p>Empty collection</p>"
 
             html += "<hr>"
 

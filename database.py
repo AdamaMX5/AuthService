@@ -1,50 +1,34 @@
-#database.py
-from sqlmodel import SQLModel, create_engine
-from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.orm import sessionmaker
+# database.py
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./auth.db")
+MONGODB_URL = os.getenv("DATABASE_URL", "mongodb://localhost:27017")
+MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "authservice")
 
-# Create async engine
-engine = create_async_engine(
-    SQLALCHEMY_DATABASE_URL,
-    echo=True,  # Set to False in production
-    future=True,
-    connect_args={"check_same_thread": False},
-    poolclass=None
-)
-
-# Create async session factory
-async_session = sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False
-)
+_client = None
 
 
 async def init_db():
-    """Initialize database tables."""
+    """Initialize MongoDB connection and Beanie ODM."""
+    global _client
+    from motor.motor_asyncio import AsyncIOMotorClient
+    from beanie import init_beanie
+    from models import User, Device, RefreshToken
     try:
-        async with engine.begin() as conn:
-            # WICHTIG: await conn.run_sync(...)
-            await conn.run_sync(SQLModel.metadata.create_all)
-        print("✅ Database tables created successfully!")
+        _client = AsyncIOMotorClient(MONGODB_URL)
+        await init_beanie(
+            database=_client[MONGODB_DB_NAME],
+            document_models=[User, Device, RefreshToken],
+        )
+        print("✅ MongoDB connected and Beanie initialized!")
         return True
     except Exception as e:
-        print(f"❌ Failed to create tables: {e}")
+        print(f"❌ Failed to connect to MongoDB: {e}")
         return False
 
 
 async def get_db():
-    """Dependency to get async DB session."""
-    async with async_session() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+    """Dependency placeholder - Beanie manages the connection globally."""
+    yield

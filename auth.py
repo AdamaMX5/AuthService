@@ -11,10 +11,7 @@ from fastapi.security import OAuth2PasswordBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 from jose.exceptions import JWTClaimsError
 from passlib.context import CryptContext
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
-from database import get_db
 from models import User
 import logging
 import os
@@ -269,7 +266,7 @@ def verify_jwt(token: str) -> Union[dict, None]:
         )
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
     payload = verify_jwt(token)
     if payload is None:
         raise HTTPException(
@@ -288,7 +285,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     logger.info(f"Token: {token}")
     logger.info(f"Email from token: {email}")
 
-    user = await db.scalar(select(User).where(User.email == email))
+    user = await User.find_one(User.email == email)
 
     logger.info(f"User from DB: {user}")
     logger.info(f"User type: {type(user)}")

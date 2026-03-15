@@ -1,9 +1,4 @@
-import asyncio
 from datetime import datetime, timedelta
-
-from pydantic import json
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
 
 from models import User, Device, RefreshToken
 from auth import get_password_hash, create_token, hash_token
@@ -53,7 +48,7 @@ def assert_status_code(response, expected_code, message=""):
         try:
             data = response.json()
             detail = data.get('detail', str(data))
-        except (ValueError, json.JSONDecodeError):
+        except Exception:
             detail = response.text or "No JSON response"
 
         raise AssertionError(

@@ -6,11 +6,8 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 from auth import configure_jwt_keys, get_current_user, get_jwt_key_storage_info
-from database import get_db
 from models import User
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -43,7 +40,7 @@ class JwtKeyPair(BaseModel):
     algorithm: str = "RS256"
     persist_to_files: bool = True
 
-      
+
 class UserPatch(BaseModel):
     email: str | None = None
     email_verify_token: str | None = None
@@ -96,8 +93,8 @@ def _require_admin(current_user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
 
 
-async def _get_active_user_or_404(user_id: str, db: AsyncSession) -> User:
-    user = await db.scalar(select(User).where(User.id == user_id))
+async def _get_active_user_or_404(user_id: str) -> User:
+    user = await User.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.deleted_at:
@@ -111,34 +108,30 @@ async def _get_active_user_or_404(user_id: str, db: AsyncSession) -> User:
 @router.post("/set_roles", status_code=status.HTTP_200_OK)
 async def set_roles(
     data: RoleList,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Sets the roles of a user to the provided list."""
     _require_admin(current_user)
 
-    user = await _get_active_user_or_404(data.user_id, db)
+    user = await _get_active_user_or_404(data.user_id)
     user.roles = data.roles
 
-    await db.commit()
-    await db.refresh(user)
+    await user.replace()
     return {"status": "roles_set", "user_id": user.id, "roles": data.roles}
 
 
 @router.post("/set_permissions", status_code=status.HTTP_200_OK)
 async def set_permissions(
     data: PermissionDict,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Replace all permissions for a user."""
     _require_admin(current_user)
 
-    user = await _get_active_user_or_404(data.user_id, db)
+    user = await _get_active_user_or_404(data.user_id)
     user.permissions = data.permissions
 
-    await db.commit()
-    await db.refresh(user)
+    await user.replace()
     return {
         "status": "permissions_set",
         "user_id": user.id,
@@ -149,19 +142,17 @@ async def set_permissions(
 @router.post("/upsert_permission", status_code=status.HTTP_200_OK)
 async def upsert_permission(
     data: PermissionItem,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Create or update one permission key."""
     _require_admin(current_user)
 
-    user = await _get_active_user_or_404(data.user_id, db)
+    user = await _get_active_user_or_404(data.user_id)
     permissions = dict(user.permissions or {})
     permissions[data.key] = data.value
     user.permissions = permissions
 
-    await db.commit()
-    await db.refresh(user)
+    await user.replace()
     return {
         "status": "permission_upserted",
         "user_id": user.id,
@@ -174,13 +165,12 @@ async def upsert_permission(
 @router.post("/remove_permission", status_code=status.HTTP_200_OK)
 async def remove_permission(
     data: PermissionKey,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Remove one permission key if present."""
     _require_admin(current_user)
 
-    user = await _get_active_user_or_404(data.user_id, db)
+    user = await _get_active_user_or_404(data.user_id)
     permissions = dict(user.permissions or {})
 
     if data.key not in permissions:
@@ -189,8 +179,7 @@ async def remove_permission(
     removed_value = permissions.pop(data.key)
     user.permissions = permissions
 
-    await db.commit()
-    await db.refresh(user)
+    await user.replace()
     return {
         "status": "permission_removed",
         "user_id": user.id,
@@ -202,26 +191,24 @@ async def remove_permission(
 
 @router.get("/users", status_code=status.HTTP_200_OK)
 async def list_users(
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Return all users with their full persisted data."""
     _require_admin(current_user)
 
-    users = (await db.scalars(select(User))).all()
+    users = await User.find_all().to_list()
     return {"status": "users_listed", "users": [_serialize_user(user) for user in users]}
 
 
 @router.get("/users/{user_id}", status_code=status.HTTP_200_OK)
 async def get_user(
     user_id: str,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Return one user with full persisted data."""
     _require_admin(current_user)
 
-    user = await db.scalar(select(User).where(User.id == user_id))
+    user = await User.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -232,13 +219,12 @@ async def get_user(
 async def patch_user(
     user_id: str,
     payload: UserPatch,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Update one or multiple user fields in one request."""
     _require_admin(current_user)
 
-    user = await db.scalar(select(User).where(User.id == user_id))
+    user = await User.get(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -249,15 +235,13 @@ async def patch_user(
     for key, value in updates.items():
         setattr(user, key, value)
 
-    await db.commit()
-    await db.refresh(user)
+    await user.replace()
     return {"status": "user_updated", "updated_fields": list(updates.keys()), "user": _serialize_user(user)}
 
 
 @router.post("/users/import", status_code=status.HTTP_200_OK)
 async def import_users(
     file: UploadFile,
-    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Import users from a JSON file and upsert by id (with email match for updates)."""
@@ -288,7 +272,7 @@ async def import_users(
             skipped_reasons.append({"index": str(idx), "reason": f"invalid payload: {exc}"})
             continue
 
-        existing_user = await db.scalar(select(User).where(User.id == import_user.id))
+        existing_user = await User.get(import_user.id)
 
         if existing_user:
             if existing_user.email != import_user.email:
@@ -308,10 +292,11 @@ async def import_users(
             existing_user.roles = import_user.roles
             existing_user.comment = import_user.comment
             existing_user.deleted_at = import_user.deleted_at
+            await existing_user.replace()
             updated += 1
             continue
 
-        existing_by_email = await db.scalar(select(User).where(User.email == import_user.email))
+        existing_by_email = await User.find_one(User.email == import_user.email)
         if existing_by_email:
             skipped += 1
             skipped_reasons.append(
@@ -322,22 +307,18 @@ async def import_users(
             )
             continue
 
-        db.add(
-            User(
-                id=import_user.id,
-                email=import_user.email,
-                is_email_verify=import_user.email_verify,
-                hashed_password=import_user.hashed_password,
-                is_password_verify=import_user.password_verify,
-                roles=import_user.roles,
-                comment=import_user.comment,
-                deleted_at=import_user.deleted_at,
-                last_login=import_user.last_login,
-            )
-        )
+        await User(
+            id=import_user.id,
+            email=import_user.email,
+            is_email_verify=import_user.email_verify,
+            hashed_password=import_user.hashed_password,
+            is_password_verify=import_user.password_verify,
+            roles=import_user.roles,
+            comment=import_user.comment,
+            deleted_at=import_user.deleted_at,
+            last_login=import_user.last_login,
+        ).insert()
         created += 1
-
-    await db.commit()
 
     return {
         "status": "users_imported",

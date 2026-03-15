@@ -2,22 +2,20 @@
 import random
 import string
 from datetime import datetime
-from sqlmodel import SQLModel, Field, select, Session
-from typing import Optional, List, Dict, Any
-from sqlalchemy import Column, JSON, event
-from typing import Type
+from typing import Optional, List, Dict, Any, Type
 
-from sqlmodel.ext.asyncio.session import AsyncSession
+import pymongo
+from beanie import Document
+from pydantic import Field
 
 
-class Base(SQLModel):
-    __abstract__ = True
-    id: Optional[str] = Field(default=None, primary_key=True, index=True)
-    comment: str = Field(default="")
+class Base(Document):
+    id: Optional[str] = None
+    comment: str = ""
     last_editor: str = Field(default="automatic", title="Email of last staff member who edited")
     created_at: datetime = Field(default_factory=datetime.utcnow, title="Created At")
-    edited_at: Optional[datetime] = Field(default=None, nullable=True)
-    deleted_at: Optional[datetime] = Field(default=None, nullable=True)
+    edited_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
 
     @classmethod
     def get_prefix(cls) -> str:
@@ -41,53 +39,73 @@ class Base(SQLModel):
         if comment:
             self.comment = comment
 
-
-class User(Base, table=True):
-    __tablename__ = "users"
-    email: str = Field(index=True, unique=True, title="email-address", min_length=5)
-    email_verify_token: Optional[str] = Field(default=None, title="email-token")
-    is_email_verify: bool = Field(default=False, title="email-address is verified")
-
-    hashed_password: str = Field(title="Password-Hash")
-    is_password_verify: bool = Field(default=False, title="Password second insert is correct")
-    password_reset_token: Optional[str] = Field(default=None, title="Password-token for resetting")
-
-    roles: List[str] = Field(default_factory=lambda: ["USER"], sa_column=Column(JSON))
-    permissions: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=True))
-
-    last_login: datetime = Field(default=None, title="Last Login date")
+    class Settings:
+        use_state_management = True
 
 
-class Device(Base, table=True):
-    user_id: Optional[str] = Field(default=None, foreign_key="users.id", title="Owner User ID")
-    name: Optional[str] = Field(index=True, title="Device Name", default=None)
-    type: Optional[str] = Field(title="Device Type", default=None)
-    fingerprint: str = Field(title="Device Fingerprint")
-    platform: Optional[str] = Field(title="Device Platform", default=None)
-    browser: Optional[str] = Field(title="Device Browser", default=None)
-    os: Optional[str] = Field(title="Device Operating System", default=None)
-    ip: Optional[str] = Field(title="Device IP Address", default=None)
-    trusted: bool = Field(default=True, title="Is Device Trusted")
+class User(Base):
+    email: str
+    email_verify_token: Optional[str] = None
+    is_email_verify: bool = False
+
+    hashed_password: str = ""
+    is_password_verify: bool = False
+    password_reset_token: Optional[str] = None
+
+    roles: List[str] = Field(default_factory=lambda: ["USER"])
+    permissions: Dict[str, Any] = Field(default_factory=dict)
+
+    last_login: Optional[datetime] = None
+
+    class Settings:
+        name = "users"
+        use_state_management = True
+        indexes = [
+            pymongo.IndexModel([("email", pymongo.ASCENDING)], unique=True),
+        ]
+
+
+class Device(Base):
+    user_id: Optional[str] = None
+    name: Optional[str] = None
+    type: Optional[str] = None
+    fingerprint: str = ""
+    platform: Optional[str] = None
+    browser: Optional[str] = None
+    os: Optional[str] = None
+    ip: Optional[str] = None
+    trusted: bool = True
     first_use: datetime = Field(default_factory=datetime.utcnow, title="First Used At")
-    last_use: datetime = Field(default=None, title="Last Used At")
+    last_use: Optional[datetime] = None
+
+    class Settings:
+        name = "devices"
+        use_state_management = True
 
 
-class RefreshToken(Base, table=True):
-    device_id: Optional[str] = Field(default=None, foreign_key="device.id", title="Owner Device and UserID")
-    token_hash: str = Field(index=True, unique=True, title="Refresh Token")
+class RefreshToken(Base):
+    device_id: Optional[str] = None
+    token_hash: str = ""
     issued_at: datetime = Field(default_factory=datetime.utcnow, title="Issued At")
-    expires_at: datetime = Field(title="Expires At")
-    revoked: bool = Field(default=False, title="Is Token Revoked e.x. logout")
-    rotated_from: Optional[str] = Field(default=None, title="Previous Token Hash if Rotated")
+    expires_at: datetime
+    revoked: bool = False
+    rotated_from: Optional[str] = None
+
+    class Settings:
+        name = "refresh_tokens"
+        use_state_management = True
+        indexes = [
+            pymongo.IndexModel([("token_hash", pymongo.ASCENDING)], unique=True),
+        ]
 
 
-async def generate_unique_id(session: AsyncSession, model_class: Type[Base], length: int = 6) -> str:
+async def generate_unique_id(model_class: Type[Base], length: int = 6) -> str:
     """Async uid-generator"""
     candidate_id = random_uid(model_class.get_prefix(), length)
-    existing = await session.scalar(select(model_class).where(model_class.id == candidate_id))
+    existing = await model_class.get(candidate_id)
     if not existing:
         return candidate_id
-    await generate_unique_id(session, model_class, length + 1)
+    return await generate_unique_id(model_class, length + 1)
 
 
 def random_uid(prefix: str, length: int = 6) -> str:

@@ -11,9 +11,8 @@ from test_utils import assert_status_code, get_auth_headers, make_user
 async def test_set_roles_success(test_client, test_db):
     admin = make_user(id="admin_1", email="admin1@example.com", roles=["ADMIN", "USER"])
     target = make_user(id="user_1", email="user1@example.com", roles=["USER"])
-    test_db.add(admin)
-    test_db.add(target)
-    await test_db.commit()
+    await admin.insert()
+    await target.insert()
 
     token = create_access_token({"sub": admin.email})
     response = await test_client.post(
@@ -32,9 +31,8 @@ async def test_set_roles_success(test_client, test_db):
 async def test_set_permissions_success(test_client, test_db):
     admin = make_user(id="admin_2", email="admin2@example.com", roles=["ADMIN"])
     target = make_user(id="user_2", email="user2@example.com", roles=["USER"])
-    test_db.add(admin)
-    test_db.add(target)
-    await test_db.commit()
+    await admin.insert()
+    await target.insert()
 
     token = create_access_token({"sub": admin.email})
     payload = {
@@ -63,9 +61,8 @@ async def test_upsert_permission_success(test_client, test_db):
         roles=["USER"],
     )
     target.permissions = {"reports": {"read": True}}
-    test_db.add(admin)
-    test_db.add(target)
-    await test_db.commit()
+    await admin.insert()
+    await target.insert()
 
     token = create_access_token({"sub": admin.email})
     response = await test_client.post(
@@ -85,9 +82,8 @@ async def test_remove_permission_success(test_client, test_db):
     admin = make_user(id="admin_4", email="admin4@example.com", roles=["ADMIN"])
     target = make_user(id="user_4", email="user4@example.com", roles=["USER"])
     target.permissions = {"audit": True, "reports": {"read": True}}
-    test_db.add(admin)
-    test_db.add(target)
-    await test_db.commit()
+    await admin.insert()
+    await target.insert()
 
     token = create_access_token({"sub": admin.email})
     response = await test_client.post(
@@ -108,10 +104,9 @@ async def test_list_users_success(test_client, test_db):
     admin = make_user(id="admin_5", email="admin5@example.com", roles=["ADMIN"])
     user_a = make_user(id="user_5a", email="user5a@example.com", roles=["USER"])
     user_b = make_user(id="user_5b", email="user5b@example.com", roles=["USER", "SUPPORT"])
-    test_db.add(admin)
-    test_db.add(user_a)
-    test_db.add(user_b)
-    await test_db.commit()
+    await admin.insert()
+    await user_a.insert()
+    await user_b.insert()
 
     token = create_access_token({"sub": admin.email})
     response = await test_client.get("/admin/users", headers=get_auth_headers(token))
@@ -127,9 +122,8 @@ async def test_list_users_success(test_client, test_db):
 async def test_get_user_success(test_client, test_db):
     admin = make_user(id="admin_6", email="admin6@example.com", roles=["ADMIN"])
     target = make_user(id="user_6", email="user6@example.com", roles=["USER"])
-    test_db.add(admin)
-    test_db.add(target)
-    await test_db.commit()
+    await admin.insert()
+    await target.insert()
 
     token = create_access_token({"sub": admin.email})
     response = await test_client.get(f"/admin/users/{target.id}", headers=get_auth_headers(token))
@@ -145,9 +139,8 @@ async def test_get_user_success(test_client, test_db):
 async def test_patch_user_partial_update_success(test_client, test_db):
     admin = make_user(id="admin_7", email="admin7@example.com", roles=["ADMIN"])
     target = make_user(id="user_7", email="user7@example.com", roles=["USER"])
-    test_db.add(admin)
-    test_db.add(target)
-    await test_db.commit()
+    await admin.insert()
+    await target.insert()
 
     token = create_access_token({"sub": admin.email})
     response = await test_client.patch(
@@ -171,8 +164,7 @@ async def test_patch_user_partial_update_success(test_client, test_db):
 
 async def test_set_jwt_keys_and_get_public_key_success(test_client, test_db):
     admin = make_user(id="admin_jwt", email="admin_jwt@example.com", roles=["ADMIN"])
-    test_db.add(admin)
-    await test_db.commit()
+    await admin.insert()
 
     token = create_access_token({"sub": admin.email})
     private_key = "dummy-private-key"
@@ -208,8 +200,7 @@ async def test_set_jwt_keys_and_get_public_key_success(test_client, test_db):
 @pytest.mark.asyncio
 async def test_jwt_key_storage_info_admin_success(test_client, test_db):
     admin = make_user(id="admin_storage", email="admin_storage@example.com", roles=["ADMIN"])
-    test_db.add(admin)
-    await test_db.commit()
+    await admin.insert()
 
     token = create_access_token({"sub": admin.email})
     response = await test_client.get("/admin/jwt/key-storage", headers=get_auth_headers(token))
@@ -233,9 +224,8 @@ async def test_import_users_creates_and_updates_by_id_when_email_matches(test_cl
         is_email_verify=False,
         is_password_verify=False,
     )
-    test_db.add(admin)
-    test_db.add(existing)
-    await test_db.commit()
+    await admin.insert()
+    await existing.insert()
 
     token = create_access_token({"sub": admin.email})
     import_payload = [
@@ -290,9 +280,8 @@ async def test_import_users_creates_and_updates_by_id_when_email_matches(test_cl
 async def test_import_users_skips_when_existing_id_has_different_email(test_client, test_db):
     admin = make_user(id="admin_import_2", email="admin.import2@example.com", roles=["ADMIN"])
     existing = make_user(id="u_conflict", email="original@example.com", roles=["USER"])
-    test_db.add(admin)
-    test_db.add(existing)
-    await test_db.commit()
+    await admin.insert()
+    await existing.insert()
 
     token = create_access_token({"sub": admin.email})
     import_payload = [

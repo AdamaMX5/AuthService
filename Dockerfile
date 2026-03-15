@@ -17,6 +17,7 @@ COPY . .
 RUN mkdir -p /app/keys
 
 VOLUME ["/app/keys"]
+# MongoDB data is managed by the mongodb container, not here
 
 EXPOSE 8000
 
