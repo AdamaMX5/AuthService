@@ -28,6 +28,7 @@ app.add_middleware(
         "http://127.0.0.1:5500",
         "http://localhost:3000",  # Falls SvelteKit
         "null",  # file:// öffnet mit Origin "null"
+        "https://office.freischule.info",
     ],
     allow_credentials=True,
     allow_methods=["*"],
