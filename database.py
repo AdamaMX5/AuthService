@@ -4,8 +4,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-MONGODB_URL = os.getenv("DATABASE_URL", "mongodb://localhost:27017")
-MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "authservice")
+from urllib.parse import urlparse as _urlparse
+
+_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017/authservice")
+MONGODB_URL = _uri
+MONGODB_DB_NAME = _urlparse(_uri).path.lstrip("/") or "authservice"
 
 _client = None
 
