@@ -4,7 +4,7 @@ from typing import Any
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 
 from auth import configure_jwt_keys, get_current_user, get_jwt_key_storage_info
@@ -326,6 +326,63 @@ async def import_users(
         "updated": updated,
         "skipped": skipped,
         "skipped_reasons": skipped_reasons,
+    }
+
+
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+
+
+@router.get("/logs", status_code=status.HTTP_200_OK)
+async def get_logs(
+    current_user: User = Depends(get_current_user),
+    minutes: float = Query(
+        default=5.0,
+        ge=0.1,
+        le=1440,
+        description="Time window in minutes (0.1–1440, i.e. up to 24 h)",
+    ),
+    level: str | None = Query(
+        default=None,
+        description="Minimum log level to include: DEBUG | INFO | WARNING | ERROR | CRITICAL",
+    ),
+    limit: int = Query(default=200, ge=1, le=1000, description="Max entries per page"),
+    offset: int = Query(default=0, ge=0, description="Entries to skip (pagination)"),
+):
+    """Return recent log entries from the in-memory ring buffer.
+
+    Entries are ordered oldest-first. The ring buffer holds the last 2 000
+    records across all log levels that reached the root logger (INFO+ by
+    default). Each entry carries an optional ``request_id`` correlation ID
+    injected by the RequestIDMiddleware.
+    """
+    _require_admin(current_user)
+
+    if level is not None and level.upper() not in _VALID_LOG_LEVELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid log level '{level}'. Use one of: {', '.join(sorted(_VALID_LOG_LEVELS))}",
+        )
+
+    from log_buffer import query_logs
+
+    logs, total = query_logs(
+        minutes=minutes,
+        min_level=level,
+        limit=limit,
+        offset=offset,
+    )
+
+    return {
+        "status": "ok",
+        "total": total,
+        "returned": len(logs),
+        "query": {
+            "minutes": minutes,
+            "level": level,
+            "limit": limit,
+            "offset": offset,
+        },
+        "logs": logs,
     }
 
 

@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import logging
 import pytest
 from fastapi import status
 
@@ -274,6 +275,118 @@ async def test_import_users_creates_and_updates_by_id_when_email_matches(test_cl
     assert users_by_id["u_DG9tx0"]["hashed_password"] == "new_hash"
     assert users_by_id["u_DG9tx0"]["roles"] == ["STUDENT"]
     assert users_by_id["u_QbE3BE"]["email"] == "k.ostwald90@gmail.com"
+
+
+@pytest.mark.asyncio
+async def test_admin_logs_returns_recent_entries(test_client, test_db):
+    admin = make_user(id="admin_logs_1", email="admin_logs1@example.com", roles=["ADMIN"])
+    await admin.insert()
+
+    sentinel = "sentinel_log_message_abc123"
+    logging.getLogger("test.logs").info(sentinel)
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.get("/admin/logs?minutes=1", headers=get_auth_headers(token))
+
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "logs" in data
+    assert "total" in data
+    assert data["query"]["minutes"] == 1.0
+    assert any(sentinel in entry["message"] for entry in data["logs"])
+
+
+@pytest.mark.asyncio
+async def test_admin_logs_level_filter_excludes_lower_levels(test_client, test_db):
+    admin = make_user(id="admin_logs_2", email="admin_logs2@example.com", roles=["ADMIN"])
+    await admin.insert()
+
+    info_sentinel = "info_sentinel_log_xyz987"
+    error_sentinel = "error_sentinel_log_xyz987"
+    logging.getLogger("test.logs").info(info_sentinel)
+    logging.getLogger("test.logs").error(error_sentinel)
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.get(
+        "/admin/logs?minutes=1&level=ERROR",
+        headers=get_auth_headers(token),
+    )
+
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    messages = [entry["message"] for entry in data["logs"]]
+    assert any(error_sentinel in m for m in messages)
+    assert not any(info_sentinel in m for m in messages)
+
+
+@pytest.mark.asyncio
+async def test_admin_logs_pagination(test_client, test_db):
+    admin = make_user(id="admin_logs_3", email="admin_logs3@example.com", roles=["ADMIN"])
+    await admin.insert()
+
+    for i in range(5):
+        logging.getLogger("test.logs").warning(f"pagination_test_entry_{i}")
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.get(
+        "/admin/logs?minutes=1&limit=2&offset=0",
+        headers=get_auth_headers(token),
+    )
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    # page size must honour the limit
+    assert data["returned"] == 2
+    # total must be >= returned (total counts all matching entries, not just the page)
+    assert data["total"] >= data["returned"]
+    assert data["query"]["limit"] == 2
+    assert data["query"]["offset"] == 0
+
+
+@pytest.mark.asyncio
+async def test_admin_logs_invalid_level_returns_400(test_client, test_db):
+    admin = make_user(id="admin_logs_4", email="admin_logs4@example.com", roles=["ADMIN"])
+    await admin.insert()
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.get(
+        "/admin/logs?level=VERBOSE",
+        headers=get_auth_headers(token),
+    )
+
+    assert_status_code(response, status.HTTP_400_BAD_REQUEST)
+
+
+@pytest.mark.asyncio
+async def test_admin_logs_forbidden_for_non_admin(test_client, test_db):
+    user = make_user(id="user_logs_1", email="user_logs1@example.com", roles=["USER"])
+    await user.insert()
+
+    token = create_access_token({"sub": user.email})
+    response = await test_client.get("/admin/logs", headers=get_auth_headers(token))
+
+    assert_status_code(response, status.HTTP_403_FORBIDDEN)
+
+
+@pytest.mark.asyncio
+async def test_admin_logs_entries_have_expected_fields(test_client, test_db):
+    admin = make_user(id="admin_logs_5", email="admin_logs5@example.com", roles=["ADMIN"])
+    await admin.insert()
+
+    logging.getLogger("test.logs").info("field_check_sentinel_log")
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.get("/admin/logs?minutes=1", headers=get_auth_headers(token))
+
+    assert_status_code(response, status.HTTP_200_OK)
+    logs = response.json()["logs"]
+    assert len(logs) > 0
+    entry = next(e for e in logs if "field_check_sentinel_log" in e["message"])
+    assert "timestamp" in entry
+    assert "level" in entry
+    assert "logger" in entry
+    assert "message" in entry
+    assert "request_id" in entry
 
 
 @pytest.mark.asyncio

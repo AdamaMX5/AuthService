@@ -1,17 +1,42 @@
 #main.py
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
 
 from user_router import router as UserRouter
 from admin_router import router as AdminRouter
 from database import init_db
 from auth import get_jwt_algorithm, get_public_jwt_key
+from log_buffer import InMemoryLogHandler, request_id_var
 import logging
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Install in-memory handler on the root logger so every module's logs are captured
+_mem_handler = InMemoryLogHandler()
+_mem_handler.setFormatter(logging.Formatter("%(message)s"))
+logging.getLogger().addHandler(_mem_handler)
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Generates a unique request ID per request and makes it available via
+    the ``request_id_var`` context variable so log records can include it."""
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        req_id = str(uuid.uuid4())
+        token = request_id_var.set(req_id)
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = req_id
+            return response
+        finally:
+            request_id_var.reset(token)
 
 
 @asynccontextmanager
@@ -21,6 +46,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
