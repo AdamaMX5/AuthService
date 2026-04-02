@@ -26,9 +26,11 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5500",  # Live Server Extension
         "http://127.0.0.1:5500",
-        "http://localhost:3000",  # Falls SvelteKit
+        "http://localhost:3000",  # Falls dev SvelteKit
+        "http://localhost:5173",  # Falls dev Node.js
         "null",  # file:// öffnet mit Origin "null"
         "https://office.freischule.info",
+        "https://office2.freischule.info",
     ],
     allow_credentials=True,
     allow_methods=["*"],
