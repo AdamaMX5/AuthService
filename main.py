@@ -1,14 +1,10 @@
 #main.py
-from fastapi import Request
-from fastapi.responses import JSONResponse
-#main.py
 from contextlib import asynccontextmanager
 
 import os
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from fastapi.middleware.cors import CORSMiddleware
 
 from user_router import router as UserRouter
 from admin_router import router as AdminRouter
@@ -19,27 +15,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def _get_cors_settings() -> dict:
-    origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
-    if not origins:
-        logger.warning("CORS_ORIGINS is not set — no origins allowed!")
-
-    methods_raw = os.getenv("CORS_METHODS", "*")
-    methods = [m.strip() for m in methods_raw.split(",") if m.strip()]
-
-    headers_raw = os.getenv("CORS_HEADERS", "*")
-    headers = [h.strip() for h in headers_raw.split(",") if h.strip()]
-
-    credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
-
-    return {
-        "allow_origins": origins,
-        "allow_methods": methods,
-        "allow_headers": headers,
-        "allow_credentials": credentials,
-    }
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -48,20 +23,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Store CORS settings for manual OPTIONS handler
-cors_settings = _get_cors_settings()
-app.add_middleware(CORSMiddleware, **cors_settings)
-
 # Include routers
 app.include_router(UserRouter)
 app.include_router(AdminRouter)
-
-# Manual OPTIONS handler for all routes to ensure CORS headers are set
-@app.options("/{path:path}")
-
-
-# Manual OPTIONS handler for all routes to ensure CORS headers are set
-@app.options("/{path:path}")
 
 
 @app.get("/")
