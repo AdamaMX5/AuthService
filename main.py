@@ -1,4 +1,7 @@
 #main.py
+from fastapi import Request
+from fastapi.responses import JSONResponse
+#main.py
 from contextlib import asynccontextmanager
 
 import os
@@ -44,11 +47,47 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.add_middleware(CORSMiddleware, **_get_cors_settings())
+
+# Store CORS settings for manual OPTIONS handler
+cors_settings = _get_cors_settings()
+app.add_middleware(CORSMiddleware, **cors_settings)
 
 # Include routers
 app.include_router(UserRouter)
 app.include_router(AdminRouter)
+
+
+# Manual OPTIONS handler for all routes to ensure CORS headers are set
+@app.options("/{path:path}")
+async def options_handler(request: Request, path: str):
+    """Handle OPTIONS requests manually to ensure CORS headers are set."""
+    origin = request.headers.get("origin")
+    
+    # Check if origin is allowed
+    allowed_origins = cors_settings["allow_origins"]
+    if "*" in allowed_origins:
+        response_origin = "*"
+    elif origin in allowed_origins:
+        response_origin = origin
+    else:
+        response_origin = None
+    
+    headers = {}
+    if response_origin:
+        headers["Access-Control-Allow-Origin"] = response_origin
+        if cors_settings["allow_credentials"]:
+            headers["Access-Control-Allow-Credentials"] = "true"
+    
+    if cors_settings["allow_methods"]:
+        headers["Access-Control-Allow-Methods"] = ", ".join(cors_settings["allow_methods"])
+    
+    if cors_settings["allow_headers"]:
+        headers["Access-Control-Allow-Headers"] = ", ".join(cors_settings["allow_headers"])
+    
+    # Add Access-Control-Max-Age for preflight caching
+    headers["Access-Control-Max-Age"] = "86400"  # 24 hours
+    
+    return JSONResponse(content={}, headers=headers)
 
 
 @app.get("/")
