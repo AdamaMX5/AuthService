@@ -64,7 +64,9 @@ async def get_jwt_public_key():
     if not public_key:
         return {"status": "not_configured", "public_key": None}
 
-    public_key = "".join(public_key.splitlines())
+    body = public_key.replace("-----BEGIN PUBLIC KEY-----", "").replace("-----END PUBLIC KEY-----", "").replace("\n", "").replace(" ", "")
+    lines = "\n".join([body[i:i+64] for i in range(0, len(body), 64)])
+    public_key = f"-----BEGIN PUBLIC KEY-----\n{lines}\n-----END PUBLIC KEY-----"
 
     return {"status": "ok", "algorithm": get_jwt_algorithm(), "public_key": public_key}
 
