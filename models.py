@@ -86,6 +86,7 @@ class Device(Base):
 class RefreshToken(Base):
     device_id: Optional[str] = None
     token_hash: str = ""
+    csrf_token_hash: str = ""
     issued_at: datetime = Field(default_factory=datetime.utcnow, title="Issued At")
     expires_at: datetime
     revoked: bool = False

@@ -161,13 +161,16 @@ async def login_user(
 
     # Refresh Token Handling (Opaque Token),
     # random Chars/String, no Claims, no JWT, only hash in DB, revocation possible, token rotation,
-    # Expires after 7-14 days (stored in DB), HttpOnly-Cookie
+    # Expires after 14 days (stored in DB), HttpOnly-Cookie
     refresh_token = create_token(64)
     refresh_token_hash = hash_token(refresh_token)
+    csrf_token = secrets.token_hex(32)
+    csrf_token_hash = hash_token(csrf_token)
     refresh_token_db = RefreshToken(
         id=await generate_unique_id(RefreshToken),
         device_id=device.id,
         token_hash=refresh_token_hash,
+        csrf_token_hash=csrf_token_hash,
         issued_at=datetime.utcnow(),
         expires_at=datetime.utcnow() + timedelta(days=14),
         revoked=False,
@@ -181,6 +184,16 @@ async def login_user(
         key="refresh_token",
         value=refresh_token,
         httponly=True,
+        secure=True,
+        samesite="strict",
+        max_age=60 * 60 * 24 * 14,
+        path="/user/refresh",
+    )
+    # CSRF-Token Cookie (not HttpOnly — frontend JS reads it and sends as X-CSRF-Token header)
+    response.set_cookie(
+        key="csrf_token",
+        value=csrf_token,
+        httponly=False,
         secure=True,
         samesite="strict",
         max_age=60 * 60 * 24 * 14,
@@ -282,10 +295,13 @@ async def reset_password(token: str, user_id: str, new_password: str, repassword
 async def refresh(
     response: Response,
     refresh_token: str | None = Cookie(default=None),
+    csrf_token: str | None = Cookie(default=None),
 ):
     logger.info(f"Refreshing access token using refresh token from cookie: {refresh_token}")
     if not refresh_token:
         raise HTTPException(status_code=401, detail="Missing refresh token")
+    if not csrf_token:
+        raise HTTPException(status_code=401, detail="Missing CSRF token")
 
     token_hash = hash_token(refresh_token)
     logger.info(f"Computed hash of refresh token: {token_hash} = hash_token({refresh_token})")
@@ -298,6 +314,8 @@ async def refresh(
     if db_token.revoked:
         # TODO: Token is used double, maybe an attack? Revoke all tokens for this device?
         raise HTTPException(status_code=401, detail="Refresh token revoked")
+    if hash_token(csrf_token) != db_token.csrf_token_hash:
+        raise HTTPException(status_code=401, detail="Invalid CSRF token")
 
     # load device
     device = await Device.get(db_token.device_id)
@@ -314,11 +332,14 @@ async def refresh(
     # Token Rotation
     new_refresh_token = create_token(64)
     new_refresh_hash = hash_token(new_refresh_token)
+    new_csrf_token = secrets.token_hex(32)
+    new_csrf_hash = hash_token(new_csrf_token)
 
     new_db_token = RefreshToken(
         id=await generate_unique_id(RefreshToken),
         device_id=device.id,
         token_hash=new_refresh_hash,
+        csrf_token_hash=new_csrf_hash,
         issued_at=datetime.utcnow(),
         expires_at=datetime.utcnow() + timedelta(days=14),
         revoked=False,
@@ -336,7 +357,16 @@ async def refresh(
         httponly=True,
         secure=True,
         samesite="strict",
-        max_age=60 * 60 * 24 * 7,
+        max_age=60 * 60 * 24 * 14,
+        path="/user/refresh",
+    )
+    response.set_cookie(
+        key="csrf_token",
+        value=new_csrf_token,
+        httponly=False,
+        secure=True,
+        samesite="strict",
+        max_age=60 * 60 * 24 * 14,
         path="/user/refresh",
     )
     return {
