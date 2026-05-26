@@ -169,7 +169,7 @@ async def login_user(
         device_id=device.id,
         token_hash=refresh_token_hash,
         issued_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(days=7),
+        expires_at=datetime.utcnow() + timedelta(days=14),
         revoked=False,
     )
     await refresh_token_db.insert()
@@ -320,7 +320,7 @@ async def refresh(
         device_id=device.id,
         token_hash=new_refresh_hash,
         issued_at=datetime.utcnow(),
-        expires_at=datetime.utcnow() + timedelta(days=7),
+        expires_at=datetime.utcnow() + timedelta(days=14),
         revoked=False,
         rotated_from=db_token.id,
     )
