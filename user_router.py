@@ -40,6 +40,23 @@ class UserRegister(BaseModel):
     device_name: Optional[str] = None
 
 
+class EmailCheck(BaseModel):
+    email: EmailStr
+
+
+@router.post("/check-email")
+@limiter.limit(rate=10)
+async def check_email(data: EmailCheck, request: Request):
+    """
+    Check whether an email address is registered. Used for email-first login flows.
+    Returns 'login' if the user exists and is fully registered, 'register' otherwise.
+    """
+    user = await User.find_one(User.email == data.email)
+    if user and user.is_password_verify and not user.deleted_at:
+        return {"status": "login"}
+    return {"status": "register"}
+
+
 @router.post("/login")
 @limiter.limit(rate=5)
 async def login(
