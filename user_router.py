@@ -40,6 +40,14 @@ class UserRegister(BaseModel):
     device_name: Optional[str] = None
 
 
+class UserRegisterComplete(BaseModel):
+    email: EmailStr
+    password: str
+    repassword: str
+    device_fingerprint: Optional[str] = None
+    device_name: Optional[str] = None
+
+
 class EmailCheck(BaseModel):
     email: EmailStr
 
@@ -266,6 +274,53 @@ async def register_user(data: UserRegister, request: Request, response: Response
     return await login_user(
         user=user,
         password=data.repassword,
+        request=request,
+        response=response,
+        device_fingerprint=data.device_fingerprint,
+        device_name=data.device_name,
+    )
+
+
+@router.post("/register-complete", status_code=status.HTTP_201_CREATED)
+@limiter.limit(rate=3)
+async def register_complete(data: UserRegisterComplete, request: Request, response: Response):
+    if data.password != data.repassword:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+
+    user = await User.find_one(User.email == data.email)
+    if user:
+        if user.deleted_at:
+            raise HTTPException(status_code=status.HTTP_451_UNAVAILABLE_FOR_LEGAL_REASONS, detail="User is deleted, call support")
+        if user.is_password_verify:
+            raise HTTPException(status_code=409, detail="Email already registered")
+
+    roles = list((user.roles if user else None) or [])
+    if "USER" not in roles:
+        roles.append("USER")
+
+    admin_exists = await User.find_one({"deleted_at": None, "roles": "ADMIN"})
+    if not admin_exists:
+        logger.warning("No Admin detected - assigning ADMIN role")
+        roles.append("ADMIN")
+
+    if user is None:
+        user = User(
+            id=await generate_unique_id(User),
+            email=data.email,
+            hashed_password=get_password_hash(data.password),
+            is_password_verify=True,
+            is_email_verify=False,
+            roles=roles,
+        )
+        await user.insert()
+    else:
+        user.hashed_password = get_password_hash(data.password)
+        user.is_password_verify = True
+        user.roles = roles
+
+    return await login_user(
+        user=user,
+        password=data.password,
         request=request,
         response=response,
         device_fingerprint=data.device_fingerprint,

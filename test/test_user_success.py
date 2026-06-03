@@ -611,3 +611,111 @@ class TestUserRouterSuccess:
 
         device = device_list[0]
         assert device.fingerprint == "same_fingerprint", f"Expected device fingerprint 'same_fingerprint' but got {device.fingerprint}, maybe a random fingerprint was generated instead of using the provided one?"
+
+    @pytest.mark.asyncio
+    async def test_register_complete_new_user_success(self, test_client, test_db):
+        """Test: Komplette Registrierung eines neuen Users in einem Schritt"""
+        register_data = {
+            "email": "complete@example.com",
+            "password": "completePassword123!",
+            "repassword": "completePassword123!",
+        }
+
+        with patch("user_router.send_verification_email"):
+            response = await test_client.post("/user/register-complete", json=register_data)
+
+        assert_status_code(response, status.HTTP_201_CREATED)
+        data = response.json()
+        assert data["email"] == "complete@example.com"
+        assert data["access_token"] != ""
+        assert data["status"] == "login_with_verify_email_send"
+        assert "USER" in data["roles"]
+
+        user = await User.find_one(User.email == "complete@example.com")
+        assert user is not None
+        assert user.is_password_verify is True
+        assert user.email_verify_token is not None
+
+    @pytest.mark.asyncio
+    async def test_register_complete_partial_user_success(self, test_client, test_db):
+        """Test: Komplette Registrierung wenn bereits ein partieller User (aus /login) existiert"""
+        partial_user = make_user(
+            id="partial_user_456",
+            email="partial@example.com",
+            password="oldPassword123!",
+            is_password_verify=False,
+            is_email_verify=False,
+            roles=[],
+        )
+        await partial_user.insert()
+
+        register_data = {
+            "email": "partial@example.com",
+            "password": "newPassword123!",
+            "repassword": "newPassword123!",
+        }
+
+        with patch("user_router.send_verification_email"):
+            response = await test_client.post("/user/register-complete", json=register_data)
+
+        assert_status_code(response, status.HTTP_201_CREATED)
+        data = response.json()
+        assert data["id"] == "partial_user_456"
+        assert data["email"] == "partial@example.com"
+        assert data["access_token"] != ""
+
+        user = await User.get("partial_user_456")
+        assert user.is_password_verify is True
+        assert "USER" in user.roles
+
+    @pytest.mark.asyncio
+    async def test_register_complete_first_user_becomes_admin(self, test_client, test_db):
+        """Test: Erster registrierter User über register-complete wird Admin"""
+        register_data = {
+            "email": "firstcomplete@example.com",
+            "password": "firstPassword123!",
+            "repassword": "firstPassword123!",
+        }
+
+        with patch("user_router.send_verification_email"):
+            response = await test_client.post("/user/register-complete", json=register_data)
+
+        assert_status_code(response, status.HTTP_201_CREATED)
+        data = response.json()
+        assert "ADMIN" in data["roles"]
+        assert "USER" in data["roles"]
+
+    @pytest.mark.asyncio
+    async def test_register_complete_passwords_mismatch(self, test_client, test_db):
+        """Test: 400 wenn Passwörter nicht übereinstimmen"""
+        register_data = {
+            "email": "mismatch@example.com",
+            "password": "password123!",
+            "repassword": "different456!",
+        }
+
+        response = await test_client.post("/user/register-complete", json=register_data)
+
+        assert_status_code(response, status.HTTP_400_BAD_REQUEST)
+        assert "Passwords do not match" in response.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_register_complete_already_registered(self, test_client, test_db):
+        """Test: 409 wenn Email bereits vollständig registriert ist"""
+        existing_user = make_user(
+            id="existing_complete_user",
+            email="existing@example.com",
+            password="existingPassword123!",
+            is_password_verify=True,
+        )
+        await existing_user.insert()
+
+        register_data = {
+            "email": "existing@example.com",
+            "password": "newPassword123!",
+            "repassword": "newPassword123!",
+        }
+
+        response = await test_client.post("/user/register-complete", json=register_data)
+
+        assert_status_code(response, status.HTTP_409_CONFLICT)
