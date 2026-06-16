@@ -5,7 +5,7 @@ from typing import Any
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from auth import configure_jwt_keys, get_current_user, get_jwt_key_storage_info
 from models import User
@@ -16,6 +16,11 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 class RoleList(BaseModel):
     user_id: str
     roles: list[str]
+
+    @field_validator("roles")
+    @classmethod
+    def normalise_roles(cls, v: list[str]) -> list[str]:
+        return [r.upper() for r in v]
 
 
 class PermissionDict(BaseModel):
@@ -53,6 +58,13 @@ class UserPatch(BaseModel):
     comment: str | None = None
     last_editor: str | None = None
     last_login: datetime | None = None
+
+    @field_validator("roles")
+    @classmethod
+    def normalise_roles(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return v
+        return [r.upper() for r in v]
 
 
 class UserImportItem(BaseModel):
@@ -114,6 +126,15 @@ async def set_roles(
     _require_admin(current_user)
 
     user = await _get_active_user_or_404(data.user_id)
+    new_roles = set(data.roles)
+
+    if "GITCLIENT" in new_roles and bool(new_roles - {"GITCLIENT"}):
+        raise HTTPException(status_code=400, detail="GITCLIENT role must be the only role on a dedicated user account")
+    if "GITCLIENT" in new_roles and bool((set(user.roles or []) - {"GITCLIENT"})):
+        raise HTTPException(status_code=400, detail="Cannot assign GITCLIENT role to a user with existing roles")
+    if "GITCLIENT" in (user.roles or []) and bool(new_roles - {"GITCLIENT"}):
+        raise HTTPException(status_code=400, detail="Cannot assign additional roles to a GITCLIENT user")
+
     user.roles = data.roles
 
     await user.replace()
@@ -129,6 +150,8 @@ async def set_permissions(
     _require_admin(current_user)
 
     user = await _get_active_user_or_404(data.user_id)
+    if "GITCLIENT" in (user.roles or []):
+        raise HTTPException(status_code=400, detail="GITCLIENT users cannot have permissions")
     user.permissions = data.permissions
 
     await user.replace()
@@ -148,6 +171,8 @@ async def upsert_permission(
     _require_admin(current_user)
 
     user = await _get_active_user_or_404(data.user_id)
+    if "GITCLIENT" in (user.roles or []):
+        raise HTTPException(status_code=400, detail="GITCLIENT users cannot have permissions")
     permissions = dict(user.permissions or {})
     permissions[data.key] = data.value
     user.permissions = permissions
@@ -171,6 +196,8 @@ async def remove_permission(
     _require_admin(current_user)
 
     user = await _get_active_user_or_404(data.user_id)
+    if "GITCLIENT" in (user.roles or []):
+        raise HTTPException(status_code=400, detail="GITCLIENT users cannot have permissions")
     permissions = dict(user.permissions or {})
 
     if data.key not in permissions:
@@ -232,6 +259,20 @@ async def patch_user(
     if not updates:
         raise HTTPException(status_code=400, detail="No fields provided for update")
 
+    if "roles" in updates:
+        new_roles = set(updates["roles"])
+        existing_roles = set(user.roles or [])
+        if "GITCLIENT" in new_roles and bool(new_roles - {"GITCLIENT"}):
+            raise HTTPException(status_code=400, detail="GITCLIENT role must be the only role on a dedicated user account")
+        if "GITCLIENT" in new_roles and bool(existing_roles - {"GITCLIENT"}):
+            raise HTTPException(status_code=400, detail="Cannot assign GITCLIENT role to a user with existing roles")
+        if "GITCLIENT" in existing_roles and bool(new_roles - {"GITCLIENT"}):
+            raise HTTPException(status_code=400, detail="Cannot assign additional roles to a GITCLIENT user")
+
+    if "permissions" in updates:
+        if "GITCLIENT" in (user.roles or []):
+            raise HTTPException(status_code=400, detail="GITCLIENT users cannot have permissions")
+
     for key, value in updates.items():
         setattr(user, key, value)
 
@@ -272,6 +313,12 @@ async def import_users(
             skipped_reasons.append({"index": str(idx), "reason": f"invalid payload: {exc}"})
             continue
 
+        import_roles = set(import_user.roles)
+        if "GITCLIENT" in import_roles and bool(import_roles - {"GITCLIENT"}):
+            skipped += 1
+            skipped_reasons.append({"id": import_user.id, "reason": "GITCLIENT role cannot be combined with other roles"})
+            continue
+
         existing_user = await User.get(import_user.id)
 
         if existing_user:
@@ -283,6 +330,16 @@ async def import_users(
                         "reason": "id already exists with a different email",
                     }
                 )
+                continue
+
+            existing_roles = set(existing_user.roles or [])
+            if "GITCLIENT" in import_roles and bool(existing_roles - {"GITCLIENT"}):
+                skipped += 1
+                skipped_reasons.append({"id": import_user.id, "reason": "Cannot assign GITCLIENT role to a user with existing roles"})
+                continue
+            if "GITCLIENT" in existing_roles and bool(import_roles - {"GITCLIENT"}):
+                skipped += 1
+                skipped_reasons.append({"id": import_user.id, "reason": "Cannot assign additional roles to a GITCLIENT user"})
                 continue
 
             existing_user.is_email_verify = import_user.email_verify

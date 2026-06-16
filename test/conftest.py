@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -63,7 +63,7 @@ async def test_client(test_db):
     Test client - test_db must be initialized first (initializes Beanie with mock MongoDB).
     """
     async with AsyncClient(
-        app=app,
+        transport=ASGITransport(app=app),
         base_url="http://test",
     ) as client:
         yield client
