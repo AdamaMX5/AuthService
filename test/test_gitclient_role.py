@@ -2,6 +2,7 @@ import pytest
 from fastapi import status
 
 from auth import create_access_token
+from models import User
 from test_utils import assert_status_code, get_auth_headers, make_user
 
 
@@ -25,10 +26,12 @@ async def test_set_roles_gitclient_with_admin_rejected(test_client, test_db):
 
 
 @pytest.mark.asyncio
-async def test_set_roles_gitclient_to_user_with_existing_roles_rejected(test_client, test_db):
-    """Assigning GITCLIENT to a user who already holds ADMIN must be rejected."""
+async def test_set_roles_gitclient_replaces_existing_roles(test_client, test_db):
+    """set_roles is a replace operation: assigning GITCLIENT to a user who already
+    holds another role must succeed, because that role is discarded in the same call.
+    The resulting role set is GITCLIENT-only, so the invariant holds (regression #14)."""
     admin = make_user(id="admin_gc2", email="admin_gc2@example.com", roles=["ADMIN"])
-    target = make_user(id="user_gc2", email="user_gc2@example.com", roles=["ADMIN"])
+    target = make_user(id="user_gc2", email="user_gc2@example.com", roles=["USER"])
     await admin.insert()
     await target.insert()
 
@@ -39,8 +42,10 @@ async def test_set_roles_gitclient_to_user_with_existing_roles_rejected(test_cli
         headers=get_auth_headers(token),
     )
 
-    assert_status_code(response, status.HTTP_400_BAD_REQUEST)
-    assert response.json()["detail"] == "Cannot assign GITCLIENT role to a user with existing roles"
+    assert_status_code(response, status.HTTP_200_OK)
+    data = response.json()
+    assert data["status"] == "roles_set"
+    assert data["roles"] == ["GITCLIENT"]
 
 
 @pytest.mark.asyncio
@@ -142,6 +147,28 @@ async def test_patch_user_gitclient_with_admin_roles_rejected(test_client, test_
 
     assert_status_code(response, status.HTTP_400_BAD_REQUEST)
     assert response.json()["detail"] == "GITCLIENT role must be the only role on a dedicated user account"
+
+
+@pytest.mark.asyncio
+async def test_patch_user_gitclient_replaces_existing_roles(test_client, test_db):
+    """PATCH roles is a replace operation: switching a user who holds USER to
+    GITCLIENT-only must succeed — the prior role is discarded in the same call
+    (regression #14)."""
+    admin = make_user(id="admin_gc10b", email="admin_gc10b@example.com", roles=["ADMIN"])
+    target = make_user(id="user_gc10b", email="user_gc10b@example.com", roles=["USER"])
+    await admin.insert()
+    await target.insert()
+
+    token = create_access_token({"sub": admin.email})
+    response = await test_client.patch(
+        f"/admin/users/{target.id}",
+        json={"roles": ["GITCLIENT"]},
+        headers=get_auth_headers(token),
+    )
+
+    assert_status_code(response, status.HTTP_200_OK)
+    refreshed = await User.get(target.id)
+    assert refreshed.roles == ["GITCLIENT"]
 
 
 @pytest.mark.asyncio

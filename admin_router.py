@@ -130,8 +130,6 @@ async def set_roles(
 
     if "GITCLIENT" in new_roles and bool(new_roles - {"GITCLIENT"}):
         raise HTTPException(status_code=400, detail="GITCLIENT role must be the only role on a dedicated user account")
-    if "GITCLIENT" in new_roles and bool((set(user.roles or []) - {"GITCLIENT"})):
-        raise HTTPException(status_code=400, detail="Cannot assign GITCLIENT role to a user with existing roles")
     if "GITCLIENT" in (user.roles or []) and bool(new_roles - {"GITCLIENT"}):
         raise HTTPException(status_code=400, detail="Cannot assign additional roles to a GITCLIENT user")
 
@@ -264,8 +262,6 @@ async def patch_user(
         existing_roles = set(user.roles or [])
         if "GITCLIENT" in new_roles and bool(new_roles - {"GITCLIENT"}):
             raise HTTPException(status_code=400, detail="GITCLIENT role must be the only role on a dedicated user account")
-        if "GITCLIENT" in new_roles and bool(existing_roles - {"GITCLIENT"}):
-            raise HTTPException(status_code=400, detail="Cannot assign GITCLIENT role to a user with existing roles")
         if "GITCLIENT" in existing_roles and bool(new_roles - {"GITCLIENT"}):
             raise HTTPException(status_code=400, detail="Cannot assign additional roles to a GITCLIENT user")
 
@@ -333,10 +329,6 @@ async def import_users(
                 continue
 
             existing_roles = set(existing_user.roles or [])
-            if "GITCLIENT" in import_roles and bool(existing_roles - {"GITCLIENT"}):
-                skipped += 1
-                skipped_reasons.append({"id": import_user.id, "reason": "Cannot assign GITCLIENT role to a user with existing roles"})
-                continue
             if "GITCLIENT" in existing_roles and bool(import_roles - {"GITCLIENT"}):
                 skipped += 1
                 skipped_reasons.append({"id": import_user.id, "reason": "Cannot assign additional roles to a GITCLIENT user"})
