@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 
 from user_router import router as UserRouter
 from admin_router import router as AdminRouter
+from internal_router import router as InternalRouter
 from database import init_db
 from auth import get_jwt_algorithm, get_public_jwt_key
 import logging
@@ -27,6 +28,7 @@ app = FastAPI(lifespan=lifespan)
 # Include routers
 app.include_router(UserRouter)
 app.include_router(AdminRouter)
+app.include_router(InternalRouter)
 
 
 @app.get("/")

@@ -6,13 +6,14 @@ from typing import Optional, Union
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import ExpiredSignatureError, JWTError, jwt
 from jose.exceptions import JWTClaimsError
 from passlib.context import CryptContext
 
 from models import User
+import hmac
 import logging
 import os
 import random
@@ -299,6 +300,46 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
             headers={"WWW-Authenticate": "Bearer"}
         )
     return user
+
+
+INTERNAL_API_KEY_PREFIX = "INTERNAL_API_KEY_"
+
+
+def _load_internal_api_keys() -> dict[str, str]:
+    """Load one API key per internal caller from env vars named INTERNAL_API_KEY_<SERVICE>.
+
+    A dedicated prefix (rather than a generic *_API_KEY suffix) keeps this list
+    from accidentally picking up unrelated secrets (e.g. a third-party API key)
+    that happen to share a naming convention.
+    """
+    keys: dict[str, str] = {}
+    for env_name, value in os.environ.items():
+        if env_name.startswith(INTERNAL_API_KEY_PREFIX) and value:
+            service_name = env_name[len(INTERNAL_API_KEY_PREFIX):]
+            keys[service_name] = value
+    return keys
+
+
+def get_internal_api_keys() -> dict[str, str]:
+    """Return the configured internal service API keys, re-read from the environment."""
+    return _load_internal_api_keys()
+
+
+def verify_internal_api_key(x_api_key: str = Header(default=None, alias="X-API-Key")) -> str:
+    """FastAPI dependency for service-to-service endpoints under /internal/*.
+
+    Compares the X-API-Key header against every configured per-service key using
+    a constant-time comparison, and returns the name of the service that matched
+    so callers can log/authorize based on caller identity.
+    """
+    if not x_api_key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="X-API-Key header missing")
+
+    for service_name, key in get_internal_api_keys().items():
+        if hmac.compare_digest(x_api_key, key):
+            return service_name
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
 
 
 def create_token(length: int) -> str:
